@@ -1,0 +1,778 @@
+# 设计说明
+
+本文是实现前的技术蓝图：模块边界、内存布局、ABI、系统调用、算法不变量、渲染与测试策略。它描述“应该满足什么”，不提供游戏实现代码。
+
+---
+
+## 1. 运行环境与已验证事实
+
+本机环境（2026-10-18）：
+
+- macOS 27.0.1，Apple Silicon（arm64）。
+- Go 1.27.2 darwin/arm64。
+- `dlv` 已安装；`asmfmt` 未安装（可选安装）。
+- 工作目录：`/Users/welkin/me/soralcf/learning/goplan9-sanke`。
+
+为了不让计划建立在猜测上，以下事实已经用临时探针验证：
+
+### 1.1 裸系统调用
+
+Darwin arm64 上，Go 汇编可以直接执行：
+
+```asm
+MOVD $4, R16        // SYS_write
+SVC  $0x80
+BCC  ok             // carry 清空表示成功
+// 失败时 R0 = errno
+```
+
+实测结果：
+
+| 操作 | `SYS_*` | 参数 | 结果 |
+|---|---:|---|---|
+| `write(1, buf, n)` | 4 | `R0=fd, R1=buf, R2=n` | 成功返回写入字节数 |
+| `ioctl(fd, TIOCGWINSZ, &ws)` | 54 | `R0=fd, R1=req, R2=arg` | 成功返回 0；pty 40×120 读出正确 |
+| `exit(code)` | 1 | `R0=code` | 进程以指定码退出 |
+| `select(...)` | 93 | — | 裸调用会被抢占信号打断，返回 `EINTR` |
+| `poll(...)` | 230 | — | 同上，不适合做稳定睡眠 |
+
+要点：
+
+- arm64 Darwin 的系统调用号直接是 `4`、`54`、`1`；不要照搬 amd64 的 `0x2000000 + n`。
+- `R16` 放系统调用号，参数放在 `R0`–`R5`。
+- 成功/失败由 carry 标志表示；失败时 `R0` 是 errno。
+- XNU 的 `bsd/kern/syscalls.master` 可以核对编号。
+
+### 1.2 睡眠
+
+Go runtime 的异步抢占会让裸 `poll/select` 在约 20ms 内返回 `EINTR`；连续重试可能一直被打断。可靠方案：
+
+- 在 Go 文件里声明动态导入：
+  `//go:cgo_import_dynamic libc_usleep usleep "/usr/lib/libSystem.B.dylib"`
+- 汇编里 `BL libc_usleep(SB)`，参数放在 `R0`（`useconds_t`，32 位）。
+- 按约 5ms 分片循环，忽略单个分片被信号打断造成的短睡。
+- 实测 `sleepUS(120000)` 总耗时约 108–120ms；分片被信号频繁打断时可能略短。
+
+这不是“纯裸 SVC”，但仍然是汇编实现，且不引入 cgo 源文件。备选方案（Go `time.Sleep` 辅助、裸 `poll`）已在路线图中讨论过；当前选择是 libc `usleep` 分片。
+
+### 1.3 窗口大小
+
+- `TIOCGWINSZ = 0x40087468`。
+- `struct winsize` 在 Darwin 上是 4 个 `uint16`：
+  `ws_row`, `ws_col`, `ws_xpixel`, `ws_ypixel`，共 8 字节。
+- 对 fd 1 做 `ioctl`；不是 tty 时返回错误，应回退到 `80×24`。
+- 实测：`script -q /dev/null sh -c 'stty rows 40 cols 120; ./probe'` 读出 `rows=40, cols=120`。
+
+### 1.4 汇编/链接
+
+- 包级 BSS 不需要在 Go 里声明：
+  `GLOBL ·buf(SB), NOPTR, $const_MaxCells*4` 可直接链接，跨 `.s` 文件用 `·buf(SB)` 访问。
+- `#include "go_asm.h"` 后可用 Go 常量：`const_boardMax`、`const_MaxCells` 等。
+- Go 调用汇编函数走 ABI0；`go tool objdump` 显示 `main.func.abi0`，编译器负责生成 ABI 包装。
+- arm64 保留寄存器：`R18`（平台）、`R27`/`R28`（编译器/链接器）、`R29`（FP）、`R30`（LR）。业务代码使用 `R0`–`R17`、`R19`–`R26`。
+- `go vet` 会检查汇编函数的参数名、偏移和大小；用好它。注意：`go build` 不做这项检查（实测参数大小写错也能构建），所以每个里程碑都要跑 `go vet`。
+
+---
+
+## 2. Go 与汇编的边界
+
+### 2.1 允许的 Go 代码
+
+产品路径中只允许：
+
+| 文件 | 内容 | 说明 |
+|---|---|---|
+| `main.go` | `func main() { run() }` | 唯一入口 |
+| `api.go` | 汇编函数声明（无函数体）、常量、`//go:cgo_import_dynamic` | 无业务逻辑 |
+| `*_test.go` | 测试、Go 参考实现、pty/性能测试 | 只在测试中运行 |
+
+常量放在 Go 里是为了让 `go_asm.h` 导出；例如：
+
+```go
+const (
+    MaxW      = 256
+    MaxH      = 128
+    MaxCells  = MaxW * MaxH
+    StatusMoved = 0
+    StatusAte   = 1
+    StatusWin   = 2
+    StatusDead  = 3
+)
+```
+
+汇编里用 `const_MaxW`、`const_StatusWin`。
+
+### 2.2 不应做的事
+
+- 不用 Go 实现移动、碰撞、食物生成、寻路、渲染、系统调用。
+- 不用 `fmt`、`os.Stdout`、`time.Sleep`、`math/rand`、`syscall` 作为产品路径的捷径。
+- 不用 Go 切片/映射保存游戏状态。
+- 不在 BSS 中保存 Go 指针；BSS 符号必须 `NOPTR`。
+- 不把从 Go 传入的指针长期保存到全局；只在调用期间使用。
+
+### 2.3 ABI0 约定
+
+汇编函数使用 Go 的稳定 ABI0：
+
+- 参数和返回值都在调用者的栈帧上，通过 `FP` 伪寄存器访问。
+- `TEXT ·f(SB), NOSPLIT, $帧大小-参数大小`。
+- 例如 `func Add(a, b int64) int64`：参数在 `a+0(FP)`、`b+8(FP)`，返回值在 `ret+16(FP)`，参数大小为 24。
+- 有局部变量时，帧大小要是 16 的倍数（arm64 栈对齐）。
+- 手写汇编默认 ABI0；不要手写 ABIInternal，除非你明确知道兼容性风险。
+
+调用关系：
+
+```text
+Go 编译器生成的 ABIInternal 代码
+        |
+        v  (自动 ABI 包装)
+ABI0 汇编函数 ·foo(SB)
+```
+
+`go tool objdump` 里看到的 `.abi0` 后缀就是这个原因。
+
+---
+
+## 3. 文件与符号组织
+
+建议：
+
+| 文件 | 符号/职责 |
+|---|---|
+| `game_arm64.s` | 状态、`initGame`、`tickWithDir`、食物、getter/setter |
+| `path_arm64.s` | 环构造、`cycleNext`/`cyclePos`、BFS、窗口判定、`chooseNext` |
+| `render_arm64.s` | 帧缓冲、HUD、边框、ANSI 序列、`render` |
+| `sys_darwin_arm64.s` | `sysWrite`、`sysIoctl`、`sysExit`、`sleepUS` |
+| `main_darwin_arm64.s` | `run()`、终端生命周期、主循环、收尾 |
+| `api.go` | 上述函数的 Go 声明、常量、动态导入指令 |
+| `main.go` | 入口 |
+
+跨文件共享：
+
+- 包级符号用 `·name(SB)`；例如 `·occ(SB)`、`·body(SB)`。
+- 只在单文件使用的临时符号可以用 `name<>(SB)`。
+- 所有状态数组放在一个文件里定义，其他文件只引用，避免重复 `GLOBL`。
+- 每个 `.s` 文件都 `#include "textflag.h"`；需要 Go 常量时再 `#include "go_asm.h"`。
+
+---
+
+## 4. BSS 内存布局
+
+### 4.1 容量上限
+
+建议上限：
+
+| 常量 | 值 | 说明 |
+|---|---:|---|
+| `MaxW` | 256 | 最宽 256 个棋盘格（512 个终端列 + 边框） |
+| `MaxH` | 128 | 最高 128 行 |
+| `MaxCells` | 32768 | `MaxW * MaxH` |
+
+典型 80×24 终端得到约 38×20 = 760 格；120×40 约 58×36 = 2088 格；上限足够覆盖大终端。
+
+所有数组按 `MaxCells` 分配，实际只使用前 `N` 个元素。
+
+### 4.2 数组
+
+| 符号 | 元素大小 | 大小 | 用途 |
+|---|---:|---:|---|
+| `·occ` | 1 | `MaxCells` | 占用位图；`occ[i] != 0` 表示被蛇占用 |
+| `·body` | 4 | `MaxCells*4` | 环缓冲，存格索引 |
+| `·cycleNext` | 4 | `MaxCells*4` | Hamiltonian 环后继 |
+| `·cyclePos` | 4 | `MaxCells*4` | 格在环上的位置 |
+| `·bfsQueue` | 4 | `MaxCells*4` | BFS 队列（线性数组） |
+| `·bfsFirst` | 4 | `MaxCells*4` | 每个格子的“第一步” |
+| `·bfsStamp` | 4 | `MaxCells*4` | 访问代（uint32；回绕到 0 时清空数组或跳过 0） |
+| `·frame` | 1 | 约 1 MiB | 帧缓冲 |
+
+`frame` 容量估算：
+
+- 最坏每行：`2*MaxW + 2` 个字符 + `\r\n`。
+- 最大行数：`MaxH + 3`（HUD、上边框、下边框）。
+- 纯 ASCII 约 `(512+2+2)*131 ≈ 68 KiB`。
+- 如果以后加颜色，每格最多再加约 10 字节转义，约 330 KiB。
+- 预留 1 MiB 足够；BSS 是虚拟内存，未触碰的页不会实际占用。
+
+### 4.3 标量
+
+| 符号 | 大小 | 用途 |
+|---|---:|---|
+| `·gameW`, `·gameH`, `·gameN` | 8 | 当前棋盘尺寸 |
+| `·headSlot`, `·tailSlot`, `·length` | 8 | 环缓冲槽位/长度 |
+| `·food` | 8 | 食物格索引；`-1` 表示无食物 |
+| `·rngState` | 8 | xorshift64 状态 |
+| `·status` | 8 | 最近一次状态码 |
+| `·ticks` | 8 | tick 计数 |
+| `·foodEaten` | 8 | 吃到的食物数 |
+| `·termRows`, `·termCols` | 8 | 终端尺寸 |
+| `·frameLen` | 8 | 当前帧字节数 |
+| `·visitedStamp` | 8 | 当前 BFS 代 |
+
+统一用 8 字节槽位，避免 4/8 字节读写混用带来的高位垃圾；数组元素仍用 `int32`，通过 `MOVW` 读写，地址偏移 `<<2`。
+
+### 4.4 初始化与重置
+
+`initGame(w, h, seed)` 至少要做：
+
+- 校验 `w/h`（`W>=2`、`H>=2`、`H` 偶数；或按你的构造要求调整）。
+- 限制到 `MaxW/MaxH`。
+- 设置 `W/H/N`。
+- 清空 `occ[0..N)`。
+- 重置 head/tail/length/food/ticks/foodEaten/status。
+- 重置随机数状态（种子 0 要换成非零常数）。
+- 清空/重建 `cycleNext`、`cyclePos`（可在 `initGame` 里构造，也可延迟到首次 `run`）。
+- `visitedStamp` 归零；不需要清 `bfsStamp` 整个数组。
+- 初始蛇长度 1，头在 `(0,0)`，`occ[0]=1`。
+- 生成第一个食物。
+
+测试之间必须调用 `initGame` 重置；不要依赖测试执行顺序。
+
+---
+
+## 5. 索引、方向与邻居
+
+### 5.1 索引
+
+```text
+idx(x, y) = y * W + x
+x = idx % W
+y = idx / W
+```
+
+在汇编里：
+
+- `W` 用 64 位或 32 位？建议标量存 64 位，索引计算用 64 位，数组偏移再 `<<2`。
+- 边界检查用 `x`、`y`，或直接检查 `idx` 与 `W` 的关系；前者更直观。
+
+### 5.2 方向编码
+
+建议固定：
+
+| 值 | 方向 | 索引增量 |
+|---:|---|---|
+| 0 | 上 | `-W` |
+| 1 | 右 | `+1` |
+| 2 | 下 | `+W` |
+| 3 | 左 | `-1` |
+
+左右移动必须检查列边界，不能只检查 `idx` 范围（`idx-1` 可能跑到上一行）。
+
+BFS 邻居顺序固定为 上、右、下、左，保证结果可复现、可与 Go 参考实现对拍。
+
+---
+
+## 6. 游戏状态机
+
+### 6.1 状态码
+
+建议：
+
+| 名称 | 值 | 含义 |
+|---|---:|---|
+| `StatusMoved` | 0 | 普通移动 |
+| `StatusAte` | 1 | 吃到食物，长度 +1 |
+| `StatusWin` | 2 | 棋盘已满 |
+| `StatusDead` | 3 | 撞墙或自撞 |
+
+`tick()` 返回其中一个。测试断言；`run()` 根据状态收尾。
+
+### 6.2 一次 tick 的顺序
+
+```text
+next = chooseNext()                  // 环 / BFS / 测试注入
+if 越界 or 占用(且不是可进入的尾巴): return Dead
+willEat = (next == food)
+
+if willEat:
+    occ[next] = 1
+    body[(headSlot+1) % N] = next
+    headSlot = (headSlot+1) % N
+    length += 1
+    if length == N: return Win
+    food = spawnFood()
+    return Ate
+else:
+    occ[body[tailSlot]] = 0          // 尾巴让开
+    tailSlot = (tailSlot+1) % N
+    body[(headSlot+1) % N] = next
+    headSlot = (headSlot+1) % N
+    return Moved
+```
+
+关键点：
+
+- 普通移动必须**先清尾巴**，再写新头；否则“新头正好是尾巴格”时会误判/覆盖。
+- 吃食物时尾巴不动，不能清尾巴。
+- `length == N` 时不能再写 `(headSlot+1)%N`（会覆盖）；胜利后停止移动。
+- `length == 1` 时 headSlot == tailSlot；普通移动清掉的是旧头，随后 head/tail 都前进到同一个新槽位。
+
+### 6.3 环缓冲不变量
+
+始终满足：
+
+- `0 <= length <= N`。
+- `headSlot`、`tailSlot` 在 `[0, N)`。
+- 有效槽位是 `tailSlot` 开始、长度 `length` 的一段（按 `N` 取模）。
+- `occ[i] == 1` 当且仅当 `i` 出现在有效 body 槽位中。
+- body 中没有重复格。
+- 食物不在 body 上（除非 `food == -1`）。
+
+把这五条写进测试，尤其是 fuzz 测试。
+
+### 6.4 食物生成
+
+建议算法：
+
+1. 用 xorshift64 生成一个随机起点 `r`。
+2. 从 `r` 开始线性扫描最多 `N` 个格（循环取模）。
+3. 找到第一个 `occ[i] == 0` 的格子，设为食物。
+4. 如果没有空位：
+   - 若 `length == N`：胜利；
+   - 否则说明状态不一致，测试应报错。
+
+线性扫描避免了接近满盘时“随机重试直到命中唯一空位”的低效。随机性仍然足够。
+
+### 6.5 胜负
+
+- 胜利：吃到食物后 `length == N`。
+- 失败：撞墙/自撞。混合策略下不应发生；若发生，测试应视为 bug，而 `run()` 做安全收尾并返回非零退出码。
+
+---
+
+## 7. Hamiltonian 环
+
+### 7.1 构造条件
+
+要求 `H` 为偶数，`W >= 2`。如果终端给的高度是奇数，向下取偶数。
+
+### 7.2 访问顺序
+
+以 4×4 为例，数字表示访问序号：
+
+```text
+ 0  15  14  13
+ 1   8   9  12
+ 2   7  10  11
+ 3   4   5   6
+```
+
+顺序：
+
+1. 从 `(0,0)` 沿第 0 列向下到 `(0,H-1)`。
+2. 在第 1..W-1 列之间，从最底行开始逐行蛇形：
+   - 行 `H-1`：向右；
+   - 行 `H-2`：向左；
+   - 行 `H-3`：向右；
+   - ……
+3. 最后一行 `y=0` 结束时在 `(1,0)`，再回到 `(0,0)`。
+
+因为 `H` 是偶数，蛇形段数是偶数，最后一段方向是“向左”，终点正好是 `(1,0)`。
+
+### 7.3 预计算
+
+- `cycleNext[cell]`：环上的下一个格。
+- `cyclePos[cell]`：环上的序号，`0..N-1`。
+
+构造时可以维护 `prev`/`cur`，每访问一个新格就设置 `cycleNext[prev]=cur`、`cyclePos[cur]=i`；最后设置 `cycleNext[last]=first`、`cyclePos[first]=0`。
+
+### 7.4 安全性
+
+如果蛇从长度 1 开始、始终沿环前进，并且只在吃到食物时增长，那么：
+
+- 蛇身始终是环上的一个连续前进区间（从 tail 到 head）。
+- 头每步只移动到环上的下一个格；该格在到达之前不可能是身体（除非它是尾巴，见下）。
+- 长度最多为 N；填满时胜利，不再移动。
+
+因此纯环策略不会自撞。它保证最终访问每个格子，所以每个食物最终都会被吃到。
+
+### 7.5 复杂度
+
+- 每 tick O(1)。
+- 填充 N 个格子需要吃 N-1 个食物；食物可能随机分布，纯环策略的总 tick 数最坏约 O(N²)。
+- 40×20（N=800）在视觉模式下可能很慢；无头测试会很快，视觉演示应使用 turbo/跳帧或较小棋盘。
+
+---
+
+## 8. 安全窗口 BFS 混合策略
+
+这是最终策略。目标：既保留环的“可证明安全”，又允许 BFS 找捷径加速。
+
+### 8.1 定义
+
+- `N = W*H`。
+- `pos[c] = cyclePos[c]`，范围 `0..N-1`。
+- `hp = pos[head]`，`tp = pos[tail]`。
+- 前向距离：
+
+```text
+forwardDist(a, b) = (b - a + N) mod N
+```
+
+在汇编里不需要取模：`d = b - a; if d < 0: d += N`（`a == b` 时为 0；`a != b` 时为 1..N-1）。
+
+- `distToTail = forwardDist(hp, tp)`。
+- 安全窗口：所有满足
+
+```text
+1 <= forwardDist(hp, c) < distToTail
+```
+
+的格子 `c`。直观上，这是“头前方、尾巴之前”的空闲区域。
+
+### 8.2 安全判定
+
+- `length == 1`：head 和 tail 是同一个格，窗口为空。此时任何空闲邻居都安全（蛇只占一个格）；也可以直接沿环。
+- `length > 1`：
+  - 窗口内的格子安全；
+  - `distToTail == 1` 时，`cycleNext[head]` 就是 tail 格，允许走进去（尾巴会让开），前提是它不是食物（食物不会在尾巴上）；
+  - 其他窗口外的格子不允许走。
+
+### 8.3 决策顺序
+
+```text
+if food 在窗口内 且 安全窗口 BFS 找到路径:
+    next = bfsFirst[food]
+else if length == 1:
+    next = cycleNext[head]（或任意空闲邻居）
+else if distToTail == 1:
+    next = cycleNext[head]   // 尾巴格
+else:
+    next = cycleNext[head]   // 纯环兜底
+```
+
+BFS 的阻塞条件：`occ[c] != 0`。窗口条件排除 tail 格（tail 被占用），尾巴特例由上面的分支处理。
+
+### 8.4 安全性论证
+
+设所有蛇身格都在环序区间 `[tp, hp]` 内，且 head 是区间前端。
+
+- 如果走窗口内的 `c`，`1 <= d < distToTail`，那么 `c` 在 `hp` 之后、`tp` 之前，新的头仍然在 tail 之前，蛇身仍在新区间内。
+- 如果走 `cycleNext[head]`，它要么是窗口内的格，要么是 tail（`distToTail == 1`），两种都安全。
+- BFS 避开了所有 `occ != 0` 的格，因此不会撞身体。
+- 因此一次移动后不变量继续成立。
+
+### 8.5 为什么不会永久卡死
+
+BFS 捷径可能跳过一些格，形成“头身后、尾巴前”的空隙。食物如果刷新在这些空隙里，当前窗口 BFS 看不到它，于是蛇沿环继续走。
+
+随着蛇前进，尾巴也在前进（没吃到食物时每 tick 让出一格）。当尾巴经过空隙后，空隙就进入“头前方”的自由区域；头绕环前进时最终会到达它。因此食物不会被永久遗漏。
+
+这也是为什么不需要“追尾巴 BFS”作为兜底：环兜底本身保证前进，尾巴的移动负责解锁身后空隙。
+
+### 8.6 边界情况
+
+- `length == 1`：`hp == tp`，`distToTail == 0`，窗口为空；必须特判。
+- `distToTail == 1`：唯一前向格是 tail；如果不允许，蛇会卡住。
+- 食物正好是 `cycleNext[head]`：BFS 应能找到并返回它；吃食物时尾巴不动，但 `c` 在 tail 之前，仍然安全。
+- 食物不在窗口内：不要强行 BFS，沿环走。
+- 满盘前的最后一步：吃下后 `length == N`，立即胜利，不再生成食物。
+
+### 8.7 可选实验（不作为主线）
+
+如果想让 BFS 更激进，可以尝试“全图 BFS + 吃完后能到达尾巴”的安全校验，再以环兜底。它可能更快，但很难给出和窗口策略同等强度的证明；建议在 M7 主线通过后再做对比实验，不要替代主线验收。
+
+---
+
+## 9. 渲染与终端
+
+### 9.1 ANSI 序列
+
+| 用途 | 序列 |
+|---|---|
+| 进入备用屏幕 | `\x1b[?1049h` |
+| 离开备用屏幕 | `\x1b[?1049l` |
+| 隐藏光标 | `\x1b[?25l` |
+| 显示光标 | `\x1b[?25h` |
+| 光标归位 | `\x1b[H` |
+| 清屏 | `\x1b[2J` |
+
+启动顺序建议：进入备用屏幕 → 隐藏光标 → 清屏/归位。
+
+退出顺序建议：显示光标 → 离开备用屏幕。恢复必须在 `sysExit` 之前完成，因为裸 `exit` 不会执行 Go 的 `defer`。
+
+### 9.2 棋盘几何
+
+终端尺寸 `rows × cols`：
+
+```text
+H = rows - 4           // HUD 1 行 + 上边框 + 下边框 + 1 行余量
+H = H - (H % 2)        // 强制偶数
+W = (cols - 2) / 2     // 左右边框各 1 列，每格 2 字符
+W = min(W, MaxW)
+H = min(H, MaxH)
+```
+
+如果 `rows`/`cols` 太小，回退到最小尺寸（例如 20×10）或打印错误并退出。所有帧写入前都要检查容量。
+
+总行数：`1 (HUD) + 1 (上边框) + H + 1 (下边框) = H + 3 <= rows - 1`，留一行防止滚屏。
+
+### 9.3 帧布局
+
+```text
+LEN 0123/0760  FOOD 42  TICK 12345        <- HUD
++--------------------------------------+  <- 上边框
+|  []  **        ()()()()              |  <- H 行棋盘
+|      ...                             |
++--------------------------------------+  <- 下边框
+```
+
+每格 2 个 ASCII 字符：
+
+- 空：`"  "`
+- 身体：`"()"` 或 `"[]"`
+- 头：`"@@"` 或 `"{}"`
+- 食物：`"**"`
+
+字形由你定，但宽度必须固定为 2，否则几何会错位。
+
+### 9.4 整帧写入
+
+- 每帧构建到 `·frame`，最后调用一次 `sysWrite(1, frame, frameLen)`。
+- 写之前先 `\x1b[H` 归位；覆盖写每个位置。
+- 不要每帧 `\x1b[2J` 清屏，否则容易闪烁。
+- `sysWrite` 要循环处理短写和 `EINTR`，直到写完或遇到不可恢复错误。
+- 帧缓冲大小要按最坏情况估算，并在构建时检查边界。
+
+### 9.5 帧率与 turbo
+
+- 模拟速率与渲染速率分离：
+  - `tickDelayUS`：每 tick 睡眠；
+  - `renderEvery`：每 K tick 渲染一次。
+- 短蛇阶段可以 20–60 ticks/s，每 tick 渲染。
+- 长蛇/接近填满时启用 turbo：`renderEvery` 增大、睡眠缩短，尽快完成。
+- 所有睡眠都用 `sleepUS` 分片，避免长时间阻塞。
+- 不要忙等；CPU 占用应保持合理。
+
+### 9.6 非 tty 与异常退出
+
+- `termSize` 失败（stdout 不是 tty）时回退 `80×24`，或者直接打印错误退出；二选一，但要在文档里说明。
+- 正常胜利/失败路径必须恢复终端。
+- 胜利时先渲染最终帧，保持约 1–2 秒（用 `sleepUS` 分片），再恢复终端并打印摘要，避免“填满的瞬间立刻消失”。
+- Ctrl-C 默认会直接终止进程，备用屏幕/光标可能残留。M8 可选实现 SIGINT 清理；否则在 README 里写明恢复命令：
+
+```bash
+tput rmcup
+tput cnorm
+```
+
+---
+
+## 10. 系统调用细节
+
+### 10.1 约定
+
+```text
+R16 = syscall number
+R0..R5 = args
+SVC #0x80
+carry clear -> success, R0 = return value
+carry set   -> failure, R0 = errno
+```
+
+### 10.2 write
+
+```text
+sysWrite(fd, buf, n) -> written
+```
+
+- 循环直到 `n` 字节写完或出错。
+- 短写时推进 `buf`、减少 `n`。
+- `EINTR`（errno 4）重试。
+- 对大帧尤其重要；不要假设一次写完。
+
+### 10.3 ioctl
+
+```text
+sysIoctl(fd, TIOCGWINSZ, &ws)
+```
+
+- `ws` 放在 BSS（8 字节），避免栈局部变量的偏移问题。
+- 返回 0 表示成功；失败时根据 errno 决定回退。
+- 读取 `ws[0]`（row）、`ws[1]`（col）。
+
+### 10.4 exit
+
+```text
+sysExit(code)
+```
+
+- `R0 = code`，`R16 = 1`，`SVC #0x80`。
+- 不返回。调用前完成终端恢复和最后的输出。
+- 不要依赖 Go 的 `defer` 或运行时清理。
+
+### 10.5 usleep
+
+```text
+sleepUS(usec):
+    remaining = usec
+    while remaining > 0:
+        chunk = min(remaining, 5000)
+        libc_usleep(chunk)
+        remaining -= chunk
+```
+
+- `libc_usleep` 返回值可能是 -1（被信号打断），忽略即可；分片保证总时长近似，被频繁打断时可能略短（实测 120ms 请求约 108–117ms）。
+- 5ms 小于 Go runtime 的典型抢占间隔，实测能稳定完成。
+- 动态导入指令放在 Go 文件里；汇编里 `BL libc_usleep(SB)`。
+- `R19`–`R26` 在 C ABI 中是 callee-saved，可以跨调用保存循环变量；`R0`–`R18` 不要假设保留。
+
+### 10.6 裸系统调用的运行时影响
+
+- 裸 `SVC` 不经过 `entersyscall`/`exitsyscall`，Go runtime 不知道线程在系统调用中。
+- 本项目的系统调用都很短（write/ioctl/exit），可以接受。
+- 不要在裸系统调用里做长时间阻塞；睡眠走 libc `usleep`，由 libc 处理信号。
+- 如果长跑时观察到 GC/STW 异常，考虑周期性调用一个 Go 安全点函数，或把主循环改回 Go；这是 M8 的风险项。
+
+---
+
+## 11. 性能模型
+
+### 11.1 每 tick
+
+- 纯环：O(1)。
+- 窗口 BFS：O(N)；每格入队一次，四次邻居检查。
+- 40×20（N=800）：每 tick 约几千条指令，60 ticks/s 毫无压力。
+- 120×50（约 58×46 = 2668 格）：仍然很轻。
+- 上限 32768 格：每 tick O(N) 也只是一次几万节点的 BFS；无头模式仍可接受。
+
+### 11.2 渲染
+
+- 每帧字节数约 `(2W+2)*H` 加边框/HUD。
+- 80×24 终端：约 38×20 → 1.6KB/帧；60fps 约 100KB/s。
+- 120×40：约 58×36 → 4.2KB/帧；60fps 约 250KB/s。
+- 终端写入通常远低于瓶颈；真正的风险是每 tick 都写 + 每帧清屏。
+- 优化顺序：整帧一次写 → 跳帧 → turbo；不要先做复杂的差量渲染。
+
+### 11.3 填充时间
+
+- 纯环最坏 O(N²) tick。
+- 安全窗口 BFS 在早期/中期能显著减少路程；后期窗口变小，仍可能较慢。
+- 因此：
+  - 无头测试必须存在，用来快速验证“最终会赢”；
+  - 视觉演示允许 turbo 和较小棋盘；
+  - 在 `docs/PERF.md` 记录不同尺寸/种子/策略的实测数据，再决定默认速度。
+
+不要在没有测量的情况下承诺“几秒填满”。
+
+### 11.4 建议测量
+
+- 每个里程碑记录：
+  - 测试耗时；
+  - 40×20 / 120×40 的 BFS 单次耗时；
+  - 纯环 vs 混合的 tick 数和 wall time；
+  - 视觉模式下的实际帧率/CPU。
+- 用 `time`、`go test -bench`、`GODEBUG=gctrace=1`，不要凭感觉。
+
+---
+
+## 12. 测试设计
+
+### 12.1 分层
+
+| 层 | 内容 | 运行方式 |
+|---|---|---|
+| 纯函数 | 索引、clamp、PRNG、`forwardDist` | 表驱动/随机对拍 |
+| 状态机 | 移动、增长、尾巴、碰撞、环缓冲 | 固定场景 + fuzz |
+| 环 | 覆盖性、相邻性、首尾相接 | 尺寸矩阵 |
+| BFS | 手工用例 + 随机网格对拍 | Go 参考实现 |
+| 不变量 | 每次 tick 后检查 | 长跑 |
+| 端到端 | 无头通关、tick 预算 | 固定种子 |
+| 终端 | pty 尺寸、非 tty 回退、恢复 | shell + 测试 |
+| 性能 | BFS、填充耗时 | benchmark + 记录 |
+
+### 12.2 必须检查的不变量
+
+- `0 <= length <= N`。
+- `occ[i] == 1` 当且仅当 `i` 在有效 body 中。
+- body 无重复。
+- 食物空闲。
+- 所有索引在 `[0, N)`。
+- 环策略下：所有 body 格在 `[tp, hp]` 前向区间内，head 是区间前端。
+- 吃食物时 tail 不变；普通移动时 tail 前进一格。
+- 胜利后不再移动/生成食物。
+
+### 12.3 测试接缝
+
+为了测试，暴露少量 asm 函数：
+
+- `initGame(w, h, seed)`
+- `tickWithDir(dir)`（正式 `tick` 内部调用 `chooseNext`）
+- `forceFood(idx)`（测试专用）
+- getter：`getLength`、`getHead`、`getTail`、`getFood`、`getCell`、`getBodySlot`、`getCyclePos`、`getStatus`、`getTicks`
+- 可选：`setRngState(seed)`
+
+这些函数必须全部在汇编里实现；Go 只声明。
+
+### 12.4 注意
+
+- 共享 BSS，测试不要 `t.Parallel()`。
+- 每个测试开头 `initGame`，不要依赖上一个测试。
+- 长跑测试要有 tick 上限，失败时输出当前状态，避免挂死。
+- 随机测试用固定种子；失败时打印种子和最小复现步骤。
+- Go 参考实现只放在 `_test.go`，不要进入产品路径。
+
+---
+
+## 13. 建议接口契约
+
+以下是建议，不是强制。你可以调整命名/编码，但一旦定了就保持一致，并用 `go vet` 检查。
+
+| Go 声明（无函数体） | 说明 |
+|---|---|
+| `func run()` | 全屏主循环；正常/异常都负责终端收尾 |
+| `func initGame(w, h, seed int32)` | 初始化/重置游戏 |
+| `func tick() int32` | 自动选择下一步并推进；返回状态码 |
+| `func tickWithDir(dir int32) int32` | 测试接缝：强制方向 |
+| `func render()` | 渲染一帧 |
+| `func termSize() int64` | 返回 `rows<<32 \| cols`；失败回退 |
+| `func sleepUS(usec int32)` | libc `usleep` 分片 |
+| `func getLength() int32` | 当前长度 |
+| `func getHead() int32` | 头格索引 |
+| `func getTail() int32` | 尾格索引 |
+| `func getFood() int32` | 食物格索引，`-1` 表示无 |
+| `func getTicks() int64` | tick 计数 |
+| `func getStatus() int32` | 最近状态码 |
+| `func getCell(idx int32) uint8` | 占用位图 |
+| `func getBodySlot(slot int32) int32` | 环缓冲槽位内容 |
+| `func getCyclePos(cell int32) int32` | 环位置 |
+| `func forceFood(cell int32)` | 测试专用 |
+
+打包 `termSize` 的原因：避免多返回值在 ABI0 里的偏移/对齐歧义；`rows<<32 | cols` 在 Go 侧拆包即可。
+
+系统调用封装（`sysWrite`/`sysIoctl`/`sysExit`）可以只在汇编内部使用，不必导出；如果测试需要，再加声明。
+
+状态码/尺寸常量放 Go `const`，汇编用 `go_asm.h`。`go vet` 会检查声明与汇编参数是否匹配。
+
+---
+
+## 14. 风险与开放决策
+
+| 风险 | 影响 | 建议 |
+|---|---|---|
+| Ctrl-C 不恢复终端 | 残留备用屏幕/隐藏光标 | M8 可选 SIGINT 清理；否则文档写明 `tput rmcup` |
+| 长跑 asm 循环无可抢占安全点 | 极端情况下 GC/STW 等待 | 本项目几乎不分配；观察 `GODEBUG=gctrace=1`；必要时加周期 Go 安全点 |
+| 裸系统调用绕过 `entersyscall` | runtime 不知道线程在 syscall | 只做短调用；睡眠走 libc |
+| 大终端填充慢 | 演示时间过长 | turbo/跳帧、尺寸上限、无头验收 |
+| `usleep` 精度受抢占影响 | 帧率抖动 | 5ms 分片；不要依赖精确帧时间 |
+| `libc_usleep` 动态导入 | 依赖 macOS libSystem | 平台限定 Darwin；Linux 移植时换实现 |
+| 终端 resize | 画面错位 | M8 可选 SIGWINCH；主线只保证启动时尺寸 |
+| 满盘前状态不一致 | 越界/崩溃 | 不变量测试 + 断言 + 安全收尾 |
+| 测试共享 BSS | 并行测试互相污染 | 不使用 `t.Parallel()`；每测试重置 |
+
+开放决策（到相应里程碑再定）：
+
+- Ctrl-C 清理：Go 信号辅助 vs libc `sigaction` vs 接受限制。
+- HUD 是否常驻、是否做颜色。
+- 默认棋盘上限、默认 tick 速率、turbo 阈值。
+- 是否需要 `--seed`/`--size` 参数（参数解析会引入更多汇编/Go 边界工作）。
+
+---
+
+## 15. 非目标
+
+- 键盘控制、暂停、重启菜单。
+- 分数持久化、排行榜。
+- 网络/多玩家。
+- 跨平台系统调用封装（可保留逻辑层可移植）。
+- 依赖第三方 TUI/随机数/测试库。
+- 用汇编实现 SIMD 渲染或极限优化。

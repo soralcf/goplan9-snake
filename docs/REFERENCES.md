@@ -1,0 +1,257 @@
+# 参考资料
+
+按“先官方、再源码、后二手资料”的顺序使用。网上很多 Go 汇编文章基于 amd64 或 Go 1.17 之前的调用约定，容易把你带偏；遇到冲突时，以本机 Go 1.27.2 的源码和 `go vet`/`objdump` 为准。
+
+本机 Go 根目录：
+
+```bash
+GOROOT=$(go env GOROOT)
+echo "$GOROOT"
+# /opt/homebrew/Cellar/go/1.27.2/libexec
+```
+
+下面用 `$GOROOT` 指代这个路径。
+
+---
+
+## 1. 必读：Go 汇编与 ABI
+
+| 资料 | 链接/本地路径 | 用途 |
+|---|---|---|
+| A Quick Guide to Go's Assembler | <https://go.dev/doc/asm> | 官方汇编语法、符号、数据、函数、ARM64 说明 |
+| 本地同一文档 | `$GOROOT/doc/asm.html` | 离线查阅；ARM64 在 “ARM64” 一节 |
+| Go 内部 ABI 规范 | <https://go.dev/s/regabi> | 理解 ABIInternal/ABI0；手写汇编用 ABI0 |
+| 本地 ABI 规范 | `$GOROOT/src/cmd/compile/abi-internal.md` | 权威细节，尤其是栈布局和寄存器 |
+| Plan 9 汇编手册 | <https://9p.io/sys/doc/asm.html> | Go 汇编的历史来源和通用规则 |
+| `textflag.h` | `$GOROOT/src/runtime/textflag.h` | `NOSPLIT`、`NOPTR`、`RODATA` 等标志 |
+| `go doc cmd/asm` | `go doc cmd/asm` | 汇编器命令行与指令集概览 |
+| `go doc cmd/vet` | `go doc cmd/vet` | `asmdecl` 会检查汇编声明 |
+
+### 读官方文档时重点关注
+
+1. 符号：`TEXT`、`GLOBL`、`DATA`、`SB`、`FP`、`PC`。
+2. 数据：字符串/字节数组怎么定义；`RODATA` 与 `NOPTR`。
+3. 函数：`$帧大小-参数大小`、ABI0、`NOSPLIT`。
+4. 运行时协调：栈帧里的指针信息（本项目尽量不用栈上指针）。
+5. ARM64：寄存器保留、寻址模式、指令宽度后缀。
+
+---
+
+## 2. 中文教材
+
+| 资料 | 链接 | 说明 |
+|---|---|---|
+| 《Go 语言高级编程》第 3 章“汇编语言” | <https://chai2010.cn/advanced-go-programming-book/ch3-asm/readme.html> | 系统性强，中文；示例以 amd64 为主，语法概念通用 |
+| 3.1 快速入门 | <https://chai2010.cn/advanced-go-programming-book/ch3-asm/ch3-01-basic.html> | 第一个汇编函数、参数/返回值 |
+| 3.3 常量和全局变量 | <https://chai2010.cn/advanced-go-programming-book/ch3-asm/ch3-03-const-and-var.html> | `GLOBL`/`DATA`/BSS |
+| 3.4 函数 | <https://chai2010.cn/advanced-go-programming-book/ch3-asm/ch3-04-func.html> | 栈帧、参数、返回值 |
+| 3.5 控制流 | <https://chai2010.cn/advanced-go-programming-book/ch3-asm/ch3-05-control-flow.html> | 分支、循环 |
+| 3.9 Delve 调试器 | <https://chai2010.cn/advanced-go-programming-book/ch3-asm/ch3-09-debug.html> | 汇编级调试 |
+| 3.10 补充说明 | <https://chai2010.cn/advanced-go-programming-book/ch3-asm/ch3-10-ext.html> | 进一步阅读、`-S` 输出 |
+
+注意：
+
+- 书中部分 AMD64 示例不能直接照搬到 arm64；寄存器、指令助记符、调用约定都不同。
+- 早期文章可能使用 `GO_ARGS`/`GO_RESULTS` 或 ABIInternal 写法；现代 Go 通常只需 ABI0 声明 + 自动包装。
+
+---
+
+## 3. ARM64 指令与 Go 汇编语法
+
+| 资料 | 链接/本地路径 | 用途 |
+|---|---|---|
+| Go ARM64 汇编器说明 | `$GOROOT/src/cmd/internal/obj/arm64/doc.go` | 官方“Go 语法 ↔ GNU 语法”映射、`MOVD/MOVW/MOVBU`、`PCALIGN` |
+| GitHub 版本 | <https://github.com/golang/go/blob/master/src/cmd/internal/obj/arm64/doc.go> | 同上 |
+| ARM64 指令名列表 | `$GOROOT/src/cmd/internal/obj/arm64/anames.go` | 查 Go 汇编器接受的助记符 |
+| 汇编器测试用例 | `$GOROOT/src/cmd/asm/internal/asm/testdata/arm64.s` | 2199 行真实语法/编码示例，非常有用 |
+| Arm 架构参考手册（ARM ARM） | <https://developer.arm.com/documentation/ddi0487/latest/> | A64 指令编码、标志、异常模型 |
+| Arm 指令集资源 | <https://support.arm.com/documentation/102374/0102/Instruction-set-resources> | 可下载 XML/HTML 指令说明 |
+
+### 常用语法速查
+
+| 需求 | Go 汇编写法 |
+|---|---|
+| 64 位加载/存储 | `MOVD` |
+| 32 位加载/存储 | `MOVW` / `MOVWU` |
+| 8 位无符号/有符号加载 | `MOVBU` / `MOVB` |
+| 16 位无符号/有符号加载 | `MOVHU` / `MOVH` |
+| 立即数到寄存器 | `MOVD $123, R0` |
+| 大立即数到内存 | 先 `MOVD $imm, R1`，再 `MOVD R1, 8(R0)` |
+| 基址+偏移 | `8(R0)` |
+| 基址+变址（缩放） | `(R1)(R2<<2)` |
+| 比较并分支 | `CMP R1, R0` + `BLT`/`BLE`/`BGT`/`BGE`/`BEQ`/`BNE` |
+| 无条件跳转 | `B label` |
+| 函数调用 | `BL ·foo(SB)` |
+| 返回 | `RET` |
+| 系统调用 | `MOVD $4, R16; SVC $0x80` |
+| 条件分支（条件码后缀） | `BCC`（carry clear）、`BCS`（carry set） |
+
+arm64 的 Go 汇编操作数顺序是“源, 目标”（类似 AT&T），与 GNU arm64 的“目标, 源”相反；用 `go tool objdump -gnu` 可以对照。
+
+---
+
+## 4. Go 源码中的真实汇编示例
+
+优先读这些文件，而不是二手博客。
+
+### 4.1 语法与通用模式
+
+| 文件 | 链接 | 可学什么 |
+|---|---|---|
+| `runtime/asm_arm64.s` | <https://github.com/golang/go/blob/master/src/runtime/asm_arm64.s> | 函数序言、栈、寄存器保存、调用约定 |
+| `runtime/memclr_arm64.s` | <https://github.com/golang/go/blob/master/src/runtime/memclr_arm64.s> | 循环、批量清零、SIMD 可选路径 |
+| `runtime/memmove_arm64.s` | <https://github.com/golang/go/blob/master/src/runtime/memmove_arm64.s> | 内存复制、对齐、分支 |
+| `internal/bytealg/compare_arm64.s` | <https://github.com/golang/go/blob/master/src/internal/bytealg/compare_arm64.s> | 循环比较、返回值 |
+| `internal/bytealg/equal_arm64.s` | <https://github.com/golang/go/blob/master/src/internal/bytealg/equal_arm64.s> | 布尔返回值、短路径 |
+| `internal/bytealg/indexbyte_arm64.s` | <https://github.com/golang/go/blob/master/src/internal/bytealg/indexbyte_arm64.s> | 搜索循环 |
+| `cmd/asm/.../testdata/arm64.s` | <https://github.com/golang/go/blob/master/src/cmd/asm/internal/asm/testdata/arm64.s> | 指令语法大全 |
+
+### 4.2 Darwin 系统调用
+
+| 文件 | 链接 | 可学什么 |
+|---|---|---|
+| `syscall/asm_darwin_arm64.s` | <https://github.com/golang/go/blob/master/src/syscall/asm_darwin_arm64.s> | `Syscall`/`RawSyscall` 的寄存器约定、`SVC $0x80`、carry/errno |
+| `runtime/sys_darwin_arm64.s` | <https://github.com/golang/go/blob/master/src/runtime/sys_darwin_arm64.s> | libSystem trampoline、`usleep`、`write`、`mmap` 等 |
+| `syscall/zsysnum_darwin_arm64.go` | `$GOROOT/src/syscall/zsysnum_darwin_arm64.go` | `SYS_WRITE=4`、`SYS_IOCTL=54`、`SYS_EXIT=1` 等 |
+| `syscall/zerrors_darwin_arm64.go` | `$GOROOT/src/syscall/zerrors_darwin_arm64.go` | `TIOCGWINSZ=0x40087468`、errno 常量 |
+| `syscall/ztypes_darwin_arm64.go` | `$GOROOT/src/syscall/ztypes_darwin_arm64.go` | `Timeval`、`Timespec` 等结构布局 |
+| `syscall/zsyscall_darwin_arm64.go` | `$GOROOT/src/syscall/zsyscall_darwin_arm64.go` | libc 动态导入与 trampoline 的生成模式 |
+
+注意：标准库在很多 Darwin 系统调用上走 libSystem trampoline，而不是裸 `SVC`；我们的探针验证了 `write`/`ioctl`/`exit` 的裸 `SVC` 可用。睡眠则选择 libc `usleep`，原因见 DESIGN。
+
+### 4.3 Go 常量的汇编导出
+
+| 文件/文档 | 说明 |
+|---|---|
+| `$GOROOT/doc/asm.html` 的 “Interacting with Go types and constants” | `go_asm.h`、`const_Name`、`Type_field` |
+| 任意带 `.s` 的包 | 构建时生成 `go_asm.h`，汇编里 `#include "go_asm.h"` |
+
+---
+
+## 5. Darwin / 终端
+
+| 资料 | 链接 | 用途 |
+|---|---|---|
+| XNU `syscalls.master` | <https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/syscalls.master> | 核对 BSD 系统调用编号（write=4、ioctl=54、exit=1、select=93、poll=230） |
+| xterm control sequences | <https://invisible-island.net/xterm/ctlseqs/ctlseqs.html> | 备用屏幕、光标、清屏、CUP 等 ANSI 序列 |
+| xterm 的 `CSI ? 1049 h/l` | 同上 | 进入/离开备用屏幕 |
+| xterm 的 `CSI ? 25 h/l` | 同上 | 显示/隐藏光标 |
+| Go `syscall` 包 | `go doc syscall` | `TIOCGWINSZ`、`Nanosleep` 等常量/接口（可读实现理解 trampoline） |
+| `golang.org/x/sys/unix` | <https://github.com/golang/sys/tree/master/unix> | 跨平台 `Winsize`/ioctl 常量参考；本项目不引入依赖，但可读源码 |
+| pty 测试工具 `script` | `man script` | 在无真实终端时设置 pty 尺寸做测试 |
+
+ANSI 要点：
+
+- `\x1b[?1049h` 进入备用屏幕；`\x1b[?1049l` 离开。
+- `\x1b[?25l` 隐藏光标；`\x1b[?25h` 显示。
+- `\x1b[H` 光标归位（等价 `\x1b[1;1H`）。
+- `\x1b[2J` 清屏；尽量少用，避免闪烁。
+- 行尾建议显式 `\r\n`，不要完全依赖终端 OPOST。
+
+---
+
+## 6. 算法资料
+
+| 资料 | 链接 | 说明 |
+|---|---|---|
+| Nokia 6110 Part 3 – Algorithms（Hamiltonian snake） | <https://johnflux.com/2015/05/02/nokia-6110-part-3-algorithms/> | Hamiltonian 环 + 安全捷径的经典文章；本项目 M5/M7 的核心思想来源 |
+| Hamiltonian path（Wikipedia） | <https://en.wikipedia.org/wiki/Hamiltonian_path> | 基本定义与网格上的存在性 |
+| Breadth-first search（Wikipedia） | <https://en.wikipedia.org/wiki/Breadth-first_search> | BFS 基础；本项目 M6 |
+| 网格蛇 AI 的常见策略 | 自行检索 “snake AI Hamiltonian cycle BFS tail” | 对照不同策略的取舍，但以本项目 DESIGN 的安全窗口为准 |
+
+阅读 Johnflux 文章时注意：
+
+- 它讨论的是“沿环 + 安全捷径”，并强调捷径可能因预期外的增长而失败；纯沿环永远安全。
+- 本文档的“安全窗口 BFS”把“不超越尾巴”的条件显式化成环序窗口，便于测试不变量。
+- 不建议在主线验收前直接采用“全图 BFS + 追尾巴”策略，因为它难以给出同等强度的安全证明。
+
+---
+
+## 7. 工具与调试
+
+| 工具/资料 | 链接/命令 | 用途 |
+|---|---|---|
+| `go tool objdump` | `go tool objdump -s 'main\.tick' ./snake` | 看真实指令；`-gnu` 对照 GNU 语法 |
+| `go tool nm` | `go tool nm ./snake \| grep main\.` | 查符号，确认 `.abi0` |
+| `go tool asm` | `go doc cmd/asm` | 单独汇编/语法检查 |
+| `go vet` | `go vet ./...` | `asmdecl` 检查汇编声明 |
+| Delve | <https://github.com/go-delve/delve> | 汇编级调试；`dlv exec ./snake` |
+| Delve CLI 文档 | <https://github.com/go-delve/delve/blob/master/Documentation/cli/README.md> | `disassemble`、`regs`、`step-instruction` |
+| `asmfmt` | <https://github.com/klauspost/asmfmt> | 格式化 `.s` 文件（可选） |
+| `go test -bench` | `go test -bench . -benchmem` | BFS/填充性能 |
+| `GODEBUG=gctrace=1` | 运行程序时设置 | 观察是否有意外的 Go 分配/GC |
+| `time` | `/usr/bin/time -l ./snake` | 墙钟/CPU/内存 |
+
+安装 `asmfmt`（可选，非必需）：
+
+```bash
+go install github.com/klauspost/asmfmt/cmd/asmfmt@latest
+```
+
+Delve 常用命令：
+
+```text
+dlv exec ./snake
+(dlv) disassemble -l main.tick
+(dlv) break main.tick
+(dlv) continue
+(dlv) step-instruction
+(dlv) regs
+(dlv) print ...
+```
+
+---
+
+## 8. 按里程碑的阅读顺序
+
+| 里程碑 | 先读 | 再读 |
+|---|---|---|
+| M0 | `go.dev/doc/asm` 的符号/函数部分；ch3 3.1、3.4 | `abi-internal.md` 的 ABI0/ABIInternal 概述 |
+| M1 | ch3 3.3、3.5；arm64 `doc.go` | `testdata/arm64.s` 的 MOV/分支示例 |
+| M2 | `syscall/asm_darwin_arm64.s`；XNU `syscalls.master` | xterm ctlseqs；`zerrors_darwin_arm64.go` |
+| M3 | ch3 3.3、3.4；本 DESIGN 的 BSS/环缓冲 | `runtime/memmove_arm64.s` 的循环/地址计算 |
+| M4 | xterm ctlseqs；本 DESIGN 的渲染 | `runtime/memclr_arm64.s` 的批量写 |
+| M5 | Johnflux 文章；本 DESIGN 的环构造 | Hamiltonian path 定义 |
+| M6 | BFS 基础；本 DESIGN 的测试策略 | `internal/bytealg` 的搜索循环（语法参考） |
+| M7 | Johnflux 的捷径/安全讨论；本 DESIGN 的安全窗口 | 自己画环序图，写不变量证明 |
+| M8 | Delve CLI 文档；`go tool objdump` | `asmfmt`、性能测量 |
+
+---
+
+## 9. 查阅本机源码的小命令
+
+```bash
+GOROOT=$(go env GOROOT)
+
+# 官方 asm 文档的 ARM64 一节
+sed -n '845,925p' "$GOROOT/doc/asm.html"
+
+# 看 Darwin arm64 的 Syscall 实现
+sed -n '1,80p' "$GOROOT/src/syscall/asm_darwin_arm64.s"
+
+# 看 libc trampoline 和 usleep
+grep -n -A6 'usleep_trampoline' "$GOROOT/src/runtime/sys_darwin_arm64.s"
+grep -n 'libc_usleep' "$GOROOT/src/syscall/zsyscall_darwin_arm64.s"
+
+# 查系统调用号
+grep -n 'SYS_WRITE\|SYS_IOCTL\|SYS_EXIT' "$GOROOT/src/syscall/zsysnum_darwin_arm64.go"
+
+# 查 TIOCGWINSZ
+grep -n 'TIOCGWINSZ' "$GOROOT/src/syscall/zerrors_darwin_arm64.go"
+
+# 查 ARM64 指令语法示例
+grep -n 'MOVBU\|LSL\|CBNZ\|SVC' "$GOROOT/src/cmd/asm/internal/asm/testdata/arm64.s" | head -40
+
+# 看 Go 自己生成的汇编（帮助你理解编译器在用哪些指令）
+go build -gcflags=-S . 2>&1 | head -100
+```
+
+---
+
+## 10. 使用二手资料的原则
+
+1. 先确认文章的目标架构（amd64/arm64）和 Go 版本。
+2. 先确认它讲的是 ABI0 还是 ABIInternal。
+3. 任何“应该能工作”的写法，都用 `go vet`、`go build`、`go tool objdump` 验证。
+4. 系统调用/终端行为以本机实测为准；Darwin 的很多东西和 Linux 不同。
+5. 遇到与官方文档冲突的内容，以 `$GOROOT` 里的源码和文档为准。
