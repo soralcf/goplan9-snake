@@ -1,4 +1,4 @@
-package main
+package arith
 
 import (
 	"math"
@@ -32,3 +32,5 @@ func TestAdd(t *testing.T) {
 		})
 	}
 }
+
+// TODO: TestClamp, TestAbsDiff, TestSumTo.

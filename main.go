@@ -1,7 +1,11 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"goplan9-sanke/internal/arith"
+)
 
 func main() {
-	fmt.Println(Add(1, 1))
+	fmt.Println(arith.Add(1, 1))
 }
