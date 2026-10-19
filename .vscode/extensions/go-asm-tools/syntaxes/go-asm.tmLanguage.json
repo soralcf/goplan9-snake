@@ -1,0 +1,255 @@
+{
+  "name": "Go Assembly",
+  "scopeName": "source.go.asm",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#preprocessor"
+    },
+    {
+      "include": "#directives"
+    },
+    {
+      "include": "#flags"
+    },
+    {
+      "include": "#registers"
+    },
+    {
+      "include": "#offsets"
+    },
+    {
+      "include": "#symbols"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#instructions"
+    },
+    {
+      "include": "#labels"
+    },
+    {
+      "include": "#numbers"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "match": "//.*$",
+          "name": "comment.line.double-slash.go.asm"
+        },
+        {
+          "begin": "/\\*",
+          "end": "\\*/",
+          "name": "comment.block.go.asm"
+        }
+      ]
+    },
+    "preprocessor": {
+      "patterns": [
+        {
+          "match": "^\\s*(#)\\s*(include|import)\\b",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.preprocessor.go.asm"
+            },
+            "2": {
+              "name": "keyword.control.preprocessor.include.go.asm"
+            }
+          }
+        },
+        {
+          "match": "^\\s*(#)\\s*(define|undef|ifdef|ifndef|if|else|elif|endif|error|warning|pragma)\\b",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.preprocessor.go.asm"
+            },
+            "2": {
+              "name": "keyword.control.preprocessor.go.asm"
+            }
+          }
+        }
+      ]
+    },
+    "directives": {
+      "patterns": [
+        {
+          "match": "\\b(?i:TEXT|DATA|GLOBL|FUNCDATA|PCDATA)\\b(?=\\s|$)",
+          "name": "keyword.control.directive.go.asm"
+        }
+      ]
+    },
+    "flags": {
+      "patterns": [
+        {
+          "match": "\\b(?i:NOSPLIT|NOFRAME|RODATA|NOPTR|DUPOK|WRAPPER|NEEDCTXT|TLSBSS|LOCAL|USEFIELD|GO_ARGS|GO_RESULTS_INITIALIZED|NO_LOCAL_POINTERS)\\b(?=\\s|,|$)",
+          "name": "storage.modifier.go.asm"
+        }
+      ]
+    },
+    "registers": {
+      "patterns": [
+        {
+          "match": "\\b(?i:R([0-9]|[12][0-9]|3[01])|V([0-9]|[12][0-9]|3[01])(\\.[0-9]*[BHSDQ])?|F([0-9]|[12][0-9]|3[01])|ZR|FP|SP|SB|PC|LR|TLS)\\b",
+          "name": "constant.language.register.go.asm"
+        },
+        {
+          "match": "\\b(?i:AX|BX|CX|DX|SI|DI|BP|R8|R9|R10|R11|R12|R13|R14|R15|X([0-9]|1[0-5])|Y([0-9]|1[0-5]))\\b",
+          "name": "constant.language.register.go.asm"
+        }
+      ]
+    },
+    "offsets": {
+      "patterns": [
+        {
+          "match": "(?<![\\w.$·<>])([A-Za-z_.$·][\\w.$·<>]*)\\s*([+-])\\s*(\\d+)\\((FP|SP)\\)",
+          "captures": {
+            "1": {
+              "name": "variable.other.readwrite.go.asm"
+            },
+            "2": {
+              "name": "keyword.operator.arithmetic.go.asm"
+            },
+            "3": {
+              "name": "constant.numeric.decimal.go.asm"
+            },
+            "4": {
+              "name": "constant.language.register.go.asm"
+            }
+          }
+        },
+        {
+          "match": "(?<![\\w.$·<>])([A-Za-z_.$·][\\w.$·<>]*)\\s*([+-])\\s*(\\d+)\\((SB)\\)",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.go.asm"
+            },
+            "2": {
+              "name": "keyword.operator.arithmetic.go.asm"
+            },
+            "3": {
+              "name": "constant.numeric.decimal.go.asm"
+            },
+            "4": {
+              "name": "constant.language.register.go.asm"
+            }
+          }
+        },
+        {
+          "match": "\\$\\s*[+-]?(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\\d[\\d_]*(?:\\.\\d[\\d_]*)?)(?:\\s*-\\s*\\d+)?",
+          "name": "constant.numeric.immediate.go.asm"
+        }
+      ]
+    },
+    "symbols": {
+      "patterns": [
+        {
+          "match": "·[A-Za-z_][\\w.$·<>]*",
+          "name": "entity.name.function.go.asm"
+        },
+        {
+          "match": "\\b[A-Za-z_][\\w.$·<>]*\\(SB\\)",
+          "name": "entity.name.function.go.asm"
+        }
+      ]
+    },
+    "instructions": {
+      "patterns": [
+        {
+          "match": "^(\\s*)([A-Z][A-Z0-9.]*)\\b(?=\\s|$)",
+          "captures": {
+            "2": {
+              "name": "keyword.other.instruction.go.asm"
+            }
+          }
+        },
+        {
+          "match": "^(\\s*)([A-Za-z_.$·][\\w.$·<>]*)(:)(\\s*)([A-Z][A-Z0-9.]*)\\b(?=\\s|$)",
+          "captures": {
+            "2": {
+              "name": "entity.name.function.label.go.asm"
+            },
+            "3": {
+              "name": "punctuation.separator.label.go.asm"
+            },
+            "5": {
+              "name": "keyword.other.instruction.go.asm"
+            }
+          }
+        }
+      ]
+    },
+    "labels": {
+      "patterns": [
+        {
+          "match": "^\\s*([A-Za-z_.$·][\\w.$·<>]*):",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.label.go.asm"
+            }
+          }
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "match": "\\b0[xX][0-9a-fA-F_]+\\b",
+          "name": "constant.numeric.hex.go.asm"
+        },
+        {
+          "match": "\\b0[bB][01_]+\\b",
+          "name": "constant.numeric.binary.go.asm"
+        },
+        {
+          "match": "\\b0[oO][0-7_]+\\b",
+          "name": "constant.numeric.octal.go.asm"
+        },
+        {
+          "match": "\\b\\d+\\.\\d+(?:[eE][+-]?\\d+)?\\b",
+          "name": "constant.numeric.float.go.asm"
+        },
+        {
+          "match": "\\b\\d[\\d_]*\\b",
+          "name": "constant.numeric.decimal.go.asm"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "begin": "\"",
+          "end": "\"",
+          "name": "string.quoted.double.go.asm",
+          "patterns": [
+            {
+              "match": "\\\\.",
+              "name": "constant.character.escape.go.asm"
+            }
+          ]
+        },
+        {
+          "begin": "'",
+          "end": "'",
+          "name": "string.quoted.single.go.asm",
+          "patterns": [
+            {
+              "match": "\\\\.",
+              "name": "constant.character.escape.go.asm"
+            }
+          ]
+        },
+        {
+          "begin": "`",
+          "end": "`",
+          "name": "string.quoted.raw.go.asm"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  // Go assembly 高亮/格式化/补全/定义跳转由项目内 workspace extension 提供：
+  // .vscode/extensions/go-asm-tools（首次需在 @recommended 中安装一次）。
+  "files.associations": {
+    "*.s": "go.asm"
+  },
+  "[go.asm]": {
+    "editor.insertSpaces": false,
+    "editor.tabSize": 8,
+    "editor.detectIndentation": false,
+    // 格式化由扩展的 save participant 处理（包括 Auto Save）；
+    // 关闭原生 formatOnSave，避免手动保存时双重格式化。
+    "editor.formatOnSave": false,
+    "editor.defaultFormatter": "local.go-asm-tools"
+  }
+}
