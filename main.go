@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"goplan9-sanke/internal/arith"
+	"goplan9sanke/internal/arith"
 )
 
 func main() {
