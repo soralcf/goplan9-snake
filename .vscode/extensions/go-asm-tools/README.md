@@ -2,7 +2,7 @@
 
 这是一个 **workspace-local** VS Code 扩展，只对当前项目生效。
 
-它把 Go Plan 9 汇编的开发体验都放进同一个扩展里：语法高亮、补全、保存时自动格式化、头文件/宏定义/局部 label 跳转、hover、Outline 和折叠。同时，它会在保存时用 `gofmt` 格式化 Go 文件，覆盖 Auto Save 场景。
+它把 Go Plan 9 汇编的开发体验都放进同一个扩展里：语法高亮、补全、保存时自动格式化、头文件/宏定义/局部 label 跳转、hover、Outline、折叠，以及一份离线手册。同时，它会在保存时用 `gofmt` 格式化 Go 文件，覆盖 Auto Save 场景。
 
 ## 安装
 
@@ -36,7 +36,9 @@
 - **Hover**：宏上方官方注释、`#define` 行和定义位置；寄存器、常用指令和伪指令的说明。
 - **Outline / 面包屑**：自动列出 `TEXT`、`DATA`、`GLOBL` 符号。
 - **代码折叠**：按 `TEXT` 函数折叠。
+- **内置手册**：`Go Assembly: Open Handbook` 打开 Webview 手册，内容随扩展一起安装，不依赖项目里的 `docs/`。手册包含 ABI0、栈帧、数据、寻址、指令、条件码、Darwin 系统调用和排错速查；内容按 `[通用]`、`[arm64]`、`[darwin]`、`[amd64]` 标注架构，关键表格附英文缩写展开列；左侧自动生成目录，支持 `Ctrl+F` / `Cmd+F` 页内搜索（`Enter` 下一个、`Shift+Enter` 上一个），代码块可一键复制。
 - **命令**（Command Palette）：
+  - `Go Assembly: Open Handbook`
   - `Go Assembly: Format All .s Files`
   - `Go Assembly: Check .s Formatting`
 
@@ -46,5 +48,6 @@
 - `.s` 格式化使用 `asmfmt`；默认查找 `~/go/bin/asmfmt`，也可以用 `ASMFMT` 环境变量指定。
 - `.go` 格式化使用 `gofmt`；默认从 `go` 同目录或 Homebrew 路径查找，也可以用 `GOFMT` 环境变量指定。
 - 查找 GOROOT 时优先使用 Go 扩展的 `go.goroot` 设置，其次使用 `GOROOT` 环境变量，最后执行 `go env GOROOT`。
+- 手册源文件是扩展内的 `handbook/ASM-HANDBOOK.md`；修改后重新执行 `Go Assembly: Open Handbook` 即可刷新（面板已打开时会重新渲染）。手册里的项目链接（如 `docs/ROADMAP.md`）按工作区根目录解析。
 - 修改扩展代码或 grammar 后需要 `Developer: Reload Window`。
 - 主题对 scope 的配色不同；如果某个 token 没有颜色，可以用 `Developer: Inspect Editor Tokens and Scopes` 查看它的 scope。

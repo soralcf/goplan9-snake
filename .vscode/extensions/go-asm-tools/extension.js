@@ -1,12 +1,16 @@
 'use strict';
 
+const crypto = require('crypto');
+const path = require('path');
 const vscode = require('vscode');
 const tooling = require('./tooling');
+const { renderMarkdown } = require('./markdown');
 
 const selector = { language: 'go.asm', scheme: 'file' };
 const output = vscode.window.createOutputChannel('Go Assembly');
 let warnedMissingAsmfmt = false;
 let warnedMissingGofmt = false;
+let handbookPanel;
 
 const DIRECTIVES = {
   TEXT: 'Declares a function symbol: `TEXT symbol(SB), flags, $framesize-argsize`.',
@@ -790,8 +794,180 @@ async function checkAll() {
   }
 }
 
+function firstWorkspaceFolder() {
+  const folders = vscode.workspace.workspaceFolders || [];
+  return folders.length > 0 ? folders[0] : undefined;
+}
+
+async function openWorkspaceFile(relativePath) {
+  const folder = firstWorkspaceFolder();
+  if (!folder) {
+    vscode.window.showWarningMessage(
+      'Go Assembly: open a workspace folder to follow local handbook links.'
+    );
+    return;
+  }
+
+  const segments = relativePath.split('/').filter((segment) => segment && segment !== '.');
+  if (segments.length === 0 || segments.includes('..')) {
+    return;
+  }
+
+  const target = vscode.Uri.joinPath(folder.uri, ...segments);
+  const root = folder.uri.fsPath.endsWith(path.sep)
+    ? folder.uri.fsPath
+    : folder.uri.fsPath + path.sep;
+  if (!target.fsPath.startsWith(root)) {
+    return;
+  }
+
+  try {
+    if (target.fsPath.endsWith('.md')) {
+      try {
+        await vscode.commands.executeCommand('markdown.showPreview', target);
+        return;
+      } catch (error) {
+        // Fall back to the text editor if the Markdown extension is unavailable.
+      }
+    }
+    const document = await vscode.workspace.openTextDocument(target);
+    await vscode.window.showTextDocument(document, { preview: true });
+  } catch (error) {
+    vscode.window.showErrorMessage(
+      `Go Assembly: cannot open ${relativePath}: ${messageOf(error)}`
+    );
+  }
+}
+
+async function handleHandbookMessage(message) {
+  if (!message || typeof message !== 'object') {
+    return;
+  }
+  if (message.type === 'copy' && typeof message.text === 'string') {
+    await vscode.env.clipboard.writeText(message.text);
+    return;
+  }
+  if (message.type === 'openExternal' && typeof message.url === 'string') {
+    if (/^https?:\/\//i.test(message.url)) {
+      await vscode.env.openExternal(vscode.Uri.parse(message.url));
+    }
+    return;
+  }
+  if (message.type === 'openFile' && typeof message.path === 'string') {
+    await openWorkspaceFile(message.path);
+  }
+}
+
+function handbookHtml(webview, extensionUri, body, nonce) {
+  const media = vscode.Uri.joinPath(extensionUri, 'media');
+  const styleUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(media, 'handbook.css')
+  );
+  const scriptUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(media, 'handbook.js')
+  );
+  const csp = [
+    "default-src 'none'",
+    `img-src ${webview.cspSource} data:`,
+    `style-src ${webview.cspSource}`,
+    `script-src 'nonce-${nonce}' ${webview.cspSource}`,
+    `font-src ${webview.cspSource}`,
+  ].join('; ');
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="${csp}">
+<link rel="stylesheet" href="${styleUri}">
+<title>Go 汇编手册</title>
+</head>
+<body>
+<a class="skip-link" href="#content">跳到正文</a>
+<header class="topbar">
+  <button id="toc-toggle" type="button" aria-label="打开目录" aria-expanded="false">目录</button>
+  <div class="brand">Go 汇编手册</div>
+  <div class="search-wrap">
+    <input id="search" type="search" placeholder="搜索手册（Ctrl/Cmd+F）" autocomplete="off" spellcheck="false" aria-label="搜索手册">
+  </div>
+  <span id="search-count" aria-live="polite"></span>
+</header>
+<div class="app">
+  <aside id="toc" aria-label="目录">
+    <div class="toc-title">目录</div>
+    <nav id="toc-list"></nav>
+  </aside>
+  <main id="content">
+${body}
+  </main>
+</div>
+<script nonce="${nonce}" src="${scriptUri}"></script>
+</body>
+</html>`;
+}
+
+async function openHandbook(context) {
+  let markdown;
+  try {
+    const source = vscode.Uri.joinPath(
+      context.extensionUri,
+      'handbook',
+      'ASM-HANDBOOK.md'
+    );
+    const bytes = await vscode.workspace.fs.readFile(source);
+    markdown = Buffer.from(bytes).toString('utf8');
+  } catch (error) {
+    vscode.window.showErrorMessage(
+      `Go Assembly: cannot read handbook: ${messageOf(error)}`
+    );
+    return;
+  }
+
+  const body = renderMarkdown(markdown, { baseDir: '' });
+  const nonce = crypto.randomBytes(16).toString('base64');
+
+  if (handbookPanel) {
+    handbookPanel.webview.html = handbookHtml(
+      handbookPanel.webview,
+      context.extensionUri,
+      body,
+      nonce
+    );
+    handbookPanel.reveal(vscode.ViewColumn.Active);
+    return;
+  }
+
+  const panel = vscode.window.createWebviewPanel(
+    'goAsm.handbook',
+    'Go 汇编手册',
+    vscode.ViewColumn.Active,
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'media')],
+    }
+  );
+  handbookPanel = panel;
+  panel.webview.html = handbookHtml(
+    panel.webview,
+    context.extensionUri,
+    body,
+    nonce
+  );
+  panel.webview.onDidReceiveMessage(handleHandbookMessage);
+  panel.onDidDispose(() => {
+    if (handbookPanel === panel) {
+      handbookPanel = undefined;
+    }
+  });
+}
+
 function activate(context) {
   context.subscriptions.push(
+    vscode.commands.registerCommand('goAsm.openHandbook', () =>
+      openHandbook(context)
+    ),
     output,
     vscode.languages.registerDocumentFormattingEditProvider(
       selector,

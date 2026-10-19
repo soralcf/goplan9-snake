@@ -69,24 +69,12 @@ echo "$GOROOT"
 
 ### 常用语法速查
 
-| 需求 | Go 汇编写法 |
-|---|---|
-| 64 位加载/存储 | `MOVD` |
-| 32 位加载/存储 | `MOVW` / `MOVWU` |
-| 8 位无符号/有符号加载 | `MOVBU` / `MOVB` |
-| 16 位无符号/有符号加载 | `MOVHU` / `MOVH` |
-| 立即数到寄存器 | `MOVD $123, R0` |
-| 大立即数到内存 | 先 `MOVD $imm, R1`，再 `MOVD R1, 8(R0)` |
-| 基址+偏移 | `8(R0)` |
-| 基址+变址（缩放） | `(R1)(R2<<2)` |
-| 比较并分支 | `CMP R1, R0` + `BLT`/`BLE`/`BGT`/`BGE`/`BEQ`/`BNE` |
-| 无条件跳转 | `B label` |
-| 函数调用 | `BL ·foo(SB)` |
-| 返回 | `RET` |
-| 系统调用 | `MOVD $4, R16; SVC $0x80` |
-| 条件分支（条件码后缀） | `BCC`（carry clear）、`BCS`（carry set） |
+指令、寻址、条件码、栈帧和系统调用约定已整理进项目内置手册，避免和这里的两份速查表各自过期：
 
-arm64 的 Go 汇编操作数顺序是“源, 目标”（类似 AT&T），与 GNU arm64 的“目标, 源”相反；用 `go tool objdump -gnu` 可以对照。
+- 命令面板执行 `Go Assembly: Open Handbook`。
+- 源文件：`.vscode/extensions/go-asm-tools/handbook/ASM-HANDBOOK.md`。
+- 手册按 `[通用]`、`[arm64]`、`[darwin]`、`[amd64]` 标注架构，关键表格附英文缩写展开列。
+- 手册内也提供了搜索、目录和可复制的代码块。
 
 ---
 
