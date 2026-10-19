@@ -99,6 +99,35 @@ a:hover {
   font-size: 12px;
 }
 
+.search-actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.search-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--vscode-icon-foreground, inherit);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.search-nav:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.2));
+}
+
+.search-nav:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 #toc-toggle {
   display: none;
   flex: none;

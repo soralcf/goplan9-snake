@@ -892,6 +892,14 @@ function handbookHtml(webview, extensionUri, body, nonce) {
     <input id="search" type="search" placeholder="搜索手册（Ctrl/Cmd+F）" autocomplete="off" spellcheck="false" aria-label="搜索手册">
   </div>
   <span id="search-count" aria-live="polite"></span>
+  <div class="search-actions" role="group" aria-label="搜索导航">
+    <button id="search-prev" type="button" class="search-nav" title="上一个匹配（Shift+Enter / ↑）" aria-label="上一个匹配" disabled>
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 7.5 6 3.5l4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button id="search-next" type="button" class="search-nav" title="下一个匹配（Enter / ↓）" aria-label="下一个匹配" disabled>
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4.5 6 8.5l4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
 </header>
 <div class="app">
   <aside id="toc" aria-label="目录">

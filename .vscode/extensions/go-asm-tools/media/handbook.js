@@ -11,6 +11,8 @@
   const tocToggle = document.getElementById('toc-toggle');
   const searchInput = document.getElementById('search');
   const searchCount = document.getElementById('search-count');
+  const searchPrev = document.getElementById('search-prev');
+  const searchNext = document.getElementById('search-next');
 
   function escapeHtml(value) {
     return String(value).replace(/[&<>"']/g, function (character) {
@@ -183,7 +185,14 @@
   }
 
   function updateSearchCount() {
-    if (hits.length === 0) {
+    const hasHits = hits.length > 0;
+    if (searchPrev) {
+      searchPrev.disabled = !hasHits;
+    }
+    if (searchNext) {
+      searchNext.disabled = !hasHits;
+    }
+    if (!hasHits) {
       searchCount.textContent = searchInput.value.trim() ? '未找到' : '';
       return;
     }
@@ -299,15 +308,47 @@
     }, 120);
   });
 
+  function stepSearch(delta) {
+    // A pending debounce means the query has not been highlighted yet; run it
+    // now and land on the far end in the requested direction.
+    if (runPendingSearch(delta < 0 ? -1 : 0)) {
+      return;
+    }
+    if (hits.length > 0) {
+      focusHit(hitIndex + delta, true);
+    }
+  }
+
+  function bindSearchNav(button, delta) {
+    if (!button) {
+      return;
+    }
+    // Keep focus in the search field so typing can continue after a click.
+    button.addEventListener('mousedown', function (event) {
+      event.preventDefault();
+    });
+    button.addEventListener('click', function () {
+      searchInput.focus();
+      stepSearch(delta);
+    });
+  }
+
+  bindSearchNav(searchPrev, -1);
+  bindSearchNav(searchNext, 1);
+
   searchInput.addEventListener('keydown', function (event) {
+    // Let the IME handle Enter and arrow keys while composing Chinese input.
+    if (event.isComposing) {
+      return;
+    }
     if (event.key === 'Enter') {
       event.preventDefault();
-      if (runPendingSearch(event.shiftKey ? -1 : 0)) {
-        return;
-      }
-      if (hits.length > 0) {
-        focusHit(hitIndex + (event.shiftKey ? -1 : 1), true);
-      }
+      stepSearch(event.shiftKey ? -1 : 1);
+      return;
+    }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      stepSearch(event.key === 'ArrowUp' ? -1 : 1);
       return;
     }
     if (event.key === 'Escape') {
