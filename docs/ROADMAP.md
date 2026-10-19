@@ -72,10 +72,10 @@ go build -o snake .        # 成功
 go tool objdump -s 'main\.Add' ./snake | head -30
 ```
 
-- [ ] objdump 输出里能看到 `main.Add.abi0` 和你写的 `ADD`/`MOVD` 指令。
-- [ ] 测试覆盖了负数与边界值。
-- [ ] 你能解释：为什么 `ret+16(FP)` 是返回值、`$0-24` 的 24 从哪来。
-- [ ] 你能解释 ABI0 与 ABIInternal 的区别，以及为什么手写汇编默认用 ABI0。
+- [x] objdump 输出里能看到 `main.Add.abi0` 和你写的 `ADD`/`MOVD` 指令。
+- [x] 测试覆盖了负数与边界值。
+- [x] 你能解释：为什么 `ret+16(FP)` 是返回值、`$0-24` 的 24 从哪来。
+- [x] 你能解释 ABI0 与 ABIInternal 的区别，以及为什么手写汇编默认用 ABI0。
 
 ### 常见坑
 
