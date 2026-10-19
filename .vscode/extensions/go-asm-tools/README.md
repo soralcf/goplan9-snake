@@ -36,7 +36,7 @@
 - **Hover**：宏上方官方注释、`#define` 行和定义位置；寄存器、常用指令和伪指令的说明。
 - **Outline / 面包屑**：自动列出 `TEXT`、`DATA`、`GLOBL` 符号。
 - **代码折叠**：按 `TEXT` 函数折叠。
-- **内置手册**：`Go Assembly: Open Handbook` 打开 Webview 手册，内容随扩展一起安装，不依赖项目里的 `docs/`。手册包含 ABI0、栈帧、数据、寻址、指令、条件码、Darwin 系统调用和排错速查；内容按 `[通用]`、`[arm64]`、`[darwin]`、`[amd64]` 标注架构，关键表格附英文缩写展开列；左侧自动生成目录，支持 `Ctrl+F` / `Cmd+F` 页内搜索（`Enter` 下一个、`Shift+Enter` 上一个），代码块可一键复制。
+- **内置手册**：`Go Assembly: Open Handbook` 打开 Webview 手册，内容随扩展一起安装，不依赖项目里的 `docs/`。手册包含 ABI0、栈帧、数据、寻址、指令、条件码、Darwin 系统调用和排错速查；内容按 `[通用]`、`[arm64]`、`[darwin]`、`[amd64]` 标注架构，关键表格附英文缩写展开列；左侧自动生成目录，支持 `Ctrl+F` / `Cmd+F` 页内搜索（计数显示 `当前 / 总数`，`Enter` 下一个、`Shift+Enter` 上一个），代码块可一键复制。
 - **命令**（Command Palette）：
   - `Go Assembly: Open Handbook`
   - `Go Assembly: Format All .s Files`

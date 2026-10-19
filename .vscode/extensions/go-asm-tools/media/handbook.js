@@ -182,8 +182,17 @@
     hitIndex = -1;
   }
 
+  function updateSearchCount() {
+    if (hits.length === 0) {
+      searchCount.textContent = searchInput.value.trim() ? '未找到' : '';
+      return;
+    }
+    searchCount.textContent = `${hitIndex + 1} / ${hits.length}`;
+  }
+
   function focusHit(index, shouldScroll) {
     if (hits.length === 0) {
+      updateSearchCount();
       return;
     }
     if (hitIndex >= 0 && hits[hitIndex]) {
@@ -195,17 +204,18 @@
     if (shouldScroll) {
       mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
+    updateSearchCount();
   }
 
   function escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  function runSearch(query) {
+  function runSearch(query, focusIndex = 0) {
     clearHighlights();
     const term = query.trim();
     if (!term) {
-      searchCount.textContent = '';
+      updateSearchCount();
       return;
     }
 
@@ -260,18 +270,31 @@
       }
     }
 
-    searchCount.textContent =
-      hits.length > 0 ? hits.length + ' 处匹配' : '未找到';
     if (hits.length > 0) {
-      focusHit(0, true);
+      focusHit(focusIndex < 0 ? hits.length - 1 : focusIndex, true);
+    } else {
+      updateSearchCount();
     }
   }
 
   let searchTimer;
 
+  // Enter can arrive before the debounce timer fires. Run the pending search
+  // first so the first Enter is not swallowed and later does not reset to hit 0.
+  function runPendingSearch(focusIndex) {
+    if (searchTimer === undefined) {
+      return false;
+    }
+    window.clearTimeout(searchTimer);
+    searchTimer = undefined;
+    runSearch(searchInput.value, focusIndex);
+    return true;
+  }
+
   searchInput.addEventListener('input', function () {
     window.clearTimeout(searchTimer);
     searchTimer = window.setTimeout(function () {
+      searchTimer = undefined;
       runSearch(searchInput.value);
     }, 120);
   });
@@ -279,6 +302,9 @@
   searchInput.addEventListener('keydown', function (event) {
     if (event.key === 'Enter') {
       event.preventDefault();
+      if (runPendingSearch(event.shiftKey ? -1 : 0)) {
+        return;
+      }
       if (hits.length > 0) {
         focusHit(hitIndex + (event.shiftKey ? -1 : 1), true);
       }
