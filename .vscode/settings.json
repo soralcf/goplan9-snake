@@ -4,6 +4,14 @@
   "files.associations": {
     "*.s": "go.asm"
   },
+  // Auto Save 也会触发 workspace extension 的 save participant，从而格式化 Go 代码。
+  "files.autoSave": "afterDelay",
+  "[go]": {
+    // Go 扩展默认 formatOnSave，但 VS Code 不会在 Auto Save 时触发它。
+    // 所有保存前的格式化统一交给 workspace extension，避免手动保存时双重格式化。
+    "editor.formatOnSave": false,
+    "editor.defaultFormatter": "golang.go"
+  },
   "[go.asm]": {
     "editor.insertSpaces": false,
     "editor.tabSize": 8,

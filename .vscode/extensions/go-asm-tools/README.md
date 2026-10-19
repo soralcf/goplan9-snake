@@ -2,7 +2,7 @@
 
 这是一个 **workspace-local** VS Code 扩展，只对当前项目生效。
 
-它把 Go Plan 9 汇编的开发体验都放进同一个扩展里：语法高亮、补全、保存时自动格式化、头文件/宏定义/局部 label 跳转、hover、Outline 和折叠。
+它把 Go Plan 9 汇编的开发体验都放进同一个扩展里：语法高亮、补全、保存时自动格式化、头文件/宏定义/局部 label 跳转、hover、Outline 和折叠。同时，它会在保存时用 `gofmt` 格式化 Go 文件，覆盖 Auto Save 场景。
 
 ## 安装
 
@@ -25,7 +25,10 @@
   - 当前文件中的 label（在 `B`/`BL`/`BEQ` 等分支后优先提示）。
   - Snippet：`TEXT`/`DATA`/`GLOBL`/`#include`/`MOVD`/`ADD`，参考 `quillaja.goasm` 的补全片段并补上了 Go 语法中的 `$`。
   - `#include "` 后提示 `textflag.h`、`funcdata.h`、`go_asm.h`。
-- **保存时自动格式化**：扩展通过 `onWillSaveTextDocument` 在每次保存前调用 `asmfmt`，包括 `files.autoSave: "afterDelay"` 的自动保存。因为 VS Code 原生 `formatOnSave` 会跳过 `afterDelay`，所以 `[go.asm]` 的 `editor.formatOnSave` 故意设为 `false`，由扩展的 save participant 统一处理，避免手动保存时双重格式化。也仍然可以手动执行 `Format Document`。
+- **保存时自动格式化**：
+  - `.s`：扩展通过 `onWillSaveTextDocument` 在每次保存前调用 `asmfmt`，包括 `files.autoSave: "afterDelay"` 的自动保存。因为 VS Code 原生 `formatOnSave` 会跳过 Auto Save，所以 `[go.asm]` 的 `editor.formatOnSave` 故意设为 `false`，由扩展的 save participant 统一处理，避免手动保存时双重格式化。
+  - `.go`：同一 save participant 在每次保存前调用 `gofmt`，因此 Auto Save 也会格式化。`[go]` 的 `editor.formatOnSave` 同样设为 `false`，避免与 Go 扩展在手动保存时重复格式化。gopls 目前不提供 on-type/range formatting，所以格式化发生在保存时（手动或自动），而不是每次按键。
+  - 仍然可以手动执行 `Format Document`。
 - **定义跳转**：
   - `#include "textflag.h"` → `$GOROOT/pkg/include/textflag.h`（不存在时回退到 `$GOROOT/src/runtime/textflag.h`）。
   - `NOSPLIT`、`DUPOK`、`RODATA`、`GO_ARGS`、`NO_LOCAL_POINTERS` 等宏 → 对应头文件中的 `#define` 行。
@@ -40,7 +43,8 @@
 ## 说明
 
 - 语言 id 仍然是 Go 扩展注册的 `go.asm`，因此 Go 扩展的汇编符号跳转等功能不受影响。
-- 格式化使用 `asmfmt`；默认查找 `~/go/bin/asmfmt`，也可以用 `ASMFMT` 环境变量指定。
+- `.s` 格式化使用 `asmfmt`；默认查找 `~/go/bin/asmfmt`，也可以用 `ASMFMT` 环境变量指定。
+- `.go` 格式化使用 `gofmt`；默认从 `go` 同目录或 Homebrew 路径查找，也可以用 `GOFMT` 环境变量指定。
 - 查找 GOROOT 时优先使用 Go 扩展的 `go.goroot` 设置，其次使用 `GOROOT` 环境变量，最后执行 `go env GOROOT`。
 - 修改扩展代码或 grammar 后需要 `Developer: Reload Window`。
 - 主题对 scope 的配色不同；如果某个 token 没有颜色，可以用 `Developer: Inspect Editor Tokens and Scopes` 查看它的 scope。

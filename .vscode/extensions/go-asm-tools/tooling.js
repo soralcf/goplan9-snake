@@ -43,8 +43,24 @@ function resolveGo() {
   );
 }
 
+function resolveGofmt() {
+  if (process.env.GOFMT) {
+    return process.env.GOFMT;
+  }
+  return firstExisting(
+    [
+      path.join(path.dirname(go), 'gofmt'),
+      '/opt/homebrew/bin/gofmt',
+      '/usr/local/go/bin/gofmt',
+      path.join(os.homedir(), 'go', 'bin', 'gofmt'),
+    ],
+    'gofmt'
+  );
+}
+
 const asmfmt = resolveAsmfmt();
 const go = resolveGo();
+const gofmt = resolveGofmt();
 let gorootCache;
 
 function execFile(file, args, options, input) {
@@ -67,6 +83,16 @@ function execFile(file, args, options, input) {
 async function formatText(text) {
   const { stdout } = await execFile(
     asmfmt,
+    [],
+    { timeout: 10000, maxBuffer: 16 * 1024 * 1024 },
+    text
+  );
+  return stdout;
+}
+
+async function formatGoText(text) {
+  const { stdout } = await execFile(
+    gofmt,
     [],
     { timeout: 10000, maxBuffer: 16 * 1024 * 1024 },
     text
@@ -363,6 +389,7 @@ module.exports = {
   architectureFor,
   findHeader,
   findMacro,
+  formatGoText,
   formatText,
   getGoroot,
   getInstructionNames,

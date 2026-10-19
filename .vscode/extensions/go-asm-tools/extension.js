@@ -6,6 +6,7 @@ const tooling = require('./tooling');
 const selector = { language: 'go.asm', scheme: 'file' };
 const output = vscode.window.createOutputChannel('Go Assembly');
 let warnedMissingAsmfmt = false;
+let warnedMissingGofmt = false;
 
 const DIRECTIVES = {
   TEXT: 'Declares a function symbol: `TEXT symbol(SB), flags, $framesize-argsize`.',
@@ -308,6 +309,30 @@ class AsmFormatter {
   provideDocumentFormattingEdits(document) {
     return formattingEdits(document);
   }
+}
+
+async function goFormattingEdits(document) {
+  const before = document.getText();
+  const version = document.version;
+  let after;
+  try {
+    after = await tooling.formatGoText(before);
+  } catch (error) {
+    const message = messageOf(error);
+    output.appendLine(`[gofmt] ${document.uri.fsPath}: ${message}`);
+    if (!warnedMissingGofmt && /ENOENT|not found|No such file/i.test(message)) {
+      warnedMissingGofmt = true;
+      vscode.window.showErrorMessage(
+        'Go Assembly: gofmt not found. Install Go or set the GOFMT environment variable.'
+      );
+    }
+    return [];
+  }
+  // Do not clobber edits made while gofmt was running.
+  if (document.version !== version) {
+    return [];
+  }
+  return minimalEdit(document, before, after);
 }
 
 class AsmDefinitionProvider {
@@ -799,6 +824,15 @@ function activate(context) {
       if (event.document.languageId === 'go.asm') {
         // Runs for manual saves and for Auto Save (afterDelay/focus changes).
         event.waitUntil(formattingEdits(event.document));
+        return;
+      }
+      if (
+        event.document.languageId === 'go' &&
+        event.document.uri.scheme === 'file'
+      ) {
+        // The Go extension's formatOnSave does not run on Auto Save, so format
+        // Go files here as well; this participant runs for all save reasons.
+        event.waitUntil(goFormattingEdits(event.document));
       }
     })
   );
