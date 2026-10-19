@@ -100,6 +100,59 @@ async function formatGoText(text) {
   return stdout;
 }
 
+// Replaces whole source lines with unique markers before formatting, then
+// restores the original text afterwards. Formatters rewrite incomplete lines
+// (trailing spaces/commas, tabs, indentation), so Auto Save uses this to leave
+// the line the user is typing untouched. Line numbers are 0-based.
+//
+// markerFor(id) builds the replacement line. Go uses a comment; Go assembly
+// must use an inline comment on an instruction, because asmfmt inserts a blank
+// line before standalone comment lines.
+function maskLines(text, lineNumbers, markerFor) {
+  const lines = [...new Set(lineNumbers)]
+    .filter((line) => Number.isInteger(line) && line >= 0)
+    .sort((a, b) => a - b);
+  const source = text.split('\n');
+  const masks = [];
+  const marker = markerFor || ((id) => `//${id}`);
+
+  let token = '__GOASM_MASK__';
+  while (text.includes(token)) {
+    token = `_${token}`;
+  }
+
+  for (const line of lines) {
+    if (line >= source.length) {
+      continue;
+    }
+    // The empty element after a trailing newline is the cursor's phantom last
+    // line. Masking it would leave an extra blank line at EOF after restore.
+    if (line === source.length - 1 && source[line] === '') {
+      continue;
+    }
+    const id = `${token}${line}__`;
+    masks.push({ id, line: source[line] });
+    source[line] = marker(id);
+  }
+
+  const restore = (formatted) => {
+    const out = formatted.split('\n');
+    for (const mask of masks) {
+      // Formatters may reindent or add a space after "//", so match the id.
+      const index = out.findIndex((line) => line.includes(mask.id));
+      if (index >= 0) {
+        out[index] = mask.line;
+      }
+    }
+    return out.join('\n');
+  };
+
+  if (masks.length === 0) {
+    return { text, restore: (formatted) => formatted };
+  }
+  return { text: source.join('\n'), restore };
+}
+
 async function runAsmfmt(args, cwd) {
   return execFile(asmfmt, args, {
     cwd,
@@ -393,6 +446,7 @@ module.exports = {
   formatText,
   getGoroot,
   getInstructionNames,
+  maskLines,
   parseInclude,
   resolveAsmfmt,
   runAsmfmt,

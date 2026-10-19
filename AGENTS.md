@@ -16,7 +16,7 @@
 
 - macOS Apple Silicon（darwin/arm64），Go 1.27.x，模块名 `goplan9sanke`（目录名仍为 `goplan9-sanke`；模块路径不能带 `-`，否则汇编无法引用跨包符号）。
 - 无第三方依赖；只使用标准库和 Go 运行时。
-- VS Code 工作区扩展 `.vscode/extensions/go-asm-tools`：`.s` 高亮/补全/`asmfmt`，`.go` 保存时 `gofmt`（包括 Auto Save）。
+- VS Code 工作区扩展 `.vscode/extensions/go-asm-tools`：`.s` 高亮/补全/`asmfmt`，`.go` 保存时 `gofmt`（包括 Auto Save；自动保存时保护光标/选区所在行）。
 - 修改工作区扩展后需要 `Developer: Reload Window`；提升 `package.json` 的 `version` 后，按扩展 README 的说明重新安装。
 
 ## 代码边界（硬性）

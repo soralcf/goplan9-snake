@@ -285,12 +285,34 @@ function findLocalLabel(document, word) {
   return undefined;
 }
 
-async function formattingEdits(document) {
+// 0-based line numbers the user is currently editing: cursor and every
+// selection in the active editor for this document. Auto Save must not
+// rewrite them, otherwise an unfinished instruction is reformatted mid-typing.
+function editingLines(document) {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.uri.toString() !== document.uri.toString()) {
+    return [];
+  }
+  const lines = new Set();
+  for (const selection of editor.selections) {
+    for (let line = selection.start.line; line <= selection.end.line; line++) {
+      lines.add(line);
+    }
+  }
+  return [...lines];
+}
+
+async function formattingEdits(document, protectedLines) {
   const before = document.getText();
   const version = document.version;
+  const masked = tooling.maskLines(
+    before,
+    protectedLines || [],
+    (id) => `\tNOP //${id}`
+  );
   let after;
   try {
-    after = await tooling.formatText(before);
+    after = await tooling.formatText(masked.text);
   } catch (error) {
     const message = messageOf(error);
     output.appendLine(`[format] ${document.uri.fsPath}: ${message}`);
@@ -306,7 +328,7 @@ async function formattingEdits(document) {
   if (document.version !== version) {
     return [];
   }
-  return minimalEdit(document, before, after);
+  return minimalEdit(document, before, masked.restore(after));
 }
 
 class AsmFormatter {
@@ -315,12 +337,13 @@ class AsmFormatter {
   }
 }
 
-async function goFormattingEdits(document) {
+async function goFormattingEdits(document, protectedLines) {
   const before = document.getText();
   const version = document.version;
+  const masked = tooling.maskLines(before, protectedLines || []);
   let after;
   try {
-    after = await tooling.formatGoText(before);
+    after = await tooling.formatGoText(masked.text);
   } catch (error) {
     const message = messageOf(error);
     output.appendLine(`[gofmt] ${document.uri.fsPath}: ${message}`);
@@ -336,7 +359,7 @@ async function goFormattingEdits(document) {
   if (document.version !== version) {
     return [];
   }
-  return minimalEdit(document, before, after);
+  return minimalEdit(document, before, masked.restore(after));
 }
 
 class AsmDefinitionProvider {
@@ -1005,9 +1028,15 @@ function activate(context) {
     vscode.commands.registerCommand('goAsm.formatAll', formatAll),
     vscode.commands.registerCommand('goAsm.check', checkAll),
     vscode.workspace.onWillSaveTextDocument((event) => {
+      // Manual saves format everything. Auto Save (afterDelay/focus changes)
+      // must not rewrite the line being typed: protect cursor/selection lines.
+      const lines =
+        event.reason === vscode.TextDocumentSaveReason.Manual
+          ? []
+          : editingLines(event.document);
       if (event.document.languageId === 'go.asm') {
         // Runs for manual saves and for Auto Save (afterDelay/focus changes).
-        event.waitUntil(formattingEdits(event.document));
+        event.waitUntil(formattingEdits(event.document, lines));
         return;
       }
       if (
@@ -1016,7 +1045,7 @@ function activate(context) {
       ) {
         // The Go extension's formatOnSave does not run on Auto Save, so format
         // Go files here as well; this participant runs for all save reasons.
-        event.waitUntil(goFormattingEdits(event.document));
+        event.waitUntil(goFormattingEdits(event.document, lines));
       }
     })
   );
