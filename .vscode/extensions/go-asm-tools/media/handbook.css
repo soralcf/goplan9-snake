@@ -494,6 +494,9 @@ body.no-toc #toc {
     bottom: 0;
     left: 0;
     z-index: 15;
+    /* A fixed grid child with align-self: start sizes to content instead of
+       resolving top/bottom, so the panel never overflows and cannot scroll. */
+    align-self: auto;
     width: var(--handbook-sidebar-width);
     height: auto;
     padding: 12px 10px 24px;
