@@ -105,9 +105,10 @@ async function formatGoText(text) {
 // (trailing spaces/commas, tabs, indentation), so Auto Save uses this to leave
 // the line the user is typing untouched. Line numbers are 0-based.
 //
-// markerFor(id) builds the replacement line. Go uses a comment; Go assembly
-// must use an inline comment on an instruction, because asmfmt inserts a blank
-// line before standalone comment lines.
+// markerFor(id, line) builds the replacement line from the original line.
+// Formatters have different blank-line rules for comments, declarations, and
+// instructions, so the marker should keep the line's role instead of always
+// using the same placeholder.
 function maskLines(text, lineNumbers, markerFor) {
   const lines = [...new Set(lineNumbers)]
     .filter((line) => Number.isInteger(line) && line >= 0)
@@ -121,18 +122,23 @@ function maskLines(text, lineNumbers, markerFor) {
     token = `_${token}`;
   }
 
+  let maskedLastLine = false;
   for (const line of lines) {
     if (line >= source.length) {
       continue;
     }
-    // The empty element after a trailing newline is the cursor's phantom last
-    // line. Masking it would leave an extra blank line at EOF after restore.
-    if (line === source.length - 1 && source[line] === '') {
+    // An empty line has nothing to protect. Replacing it with a marker would
+    // change the formatter's blank-line rules around it (for example gofmt
+    // adds a blank line between "package" and a following comment), so skip
+    // it. This also covers the phantom line after a trailing newline.
+    if (source[line] === '') {
       continue;
     }
+    maskedLastLine = line === source.length - 1;
     const id = `${token}${line}__`;
-    masks.push({ id, line: source[line] });
-    source[line] = marker(id);
+    const original = source[line];
+    masks.push({ id, line: original });
+    source[line] = marker(id, original);
   }
 
   const restore = (formatted) => {
@@ -144,13 +150,71 @@ function maskLines(text, lineNumbers, markerFor) {
         out[index] = mask.line;
       }
     }
-    return out.join('\n');
+    let restored = out.join('\n');
+    // Formatters always terminate the file with a newline. While the user is
+    // typing on the last line there is no trailing newline yet, so adding one
+    // edits the very line being protected: the cursor jumps to a new line, and
+    // if the edit is applied after a keystroke it can split the typed text.
+    // Keep EOF exactly as it was until the line is no longer protected.
+    if (maskedLastLine && !text.endsWith('\n') && restored.endsWith('\n')) {
+      restored = restored.slice(0, -1);
+    }
+    return restored;
   };
 
   if (masks.length === 0) {
     return { text, restore: (formatted) => formatted };
   }
   return { text: source.join('\n'), restore };
+}
+
+// Placeholder lines for Auto Save. They must keep the protected line's role:
+// formatters change blank-line placement around comments, declarations, and
+// instructions, so a generic placeholder would reformat the neighbours.
+function asmMaskMarker(id, line) {
+  if (/^\s*\/\//.test(line)) {
+    return `${/^\s*/.exec(line)[0]}//${id}`;
+  }
+  if (/^\s*#\s*include\b/.test(line)) {
+    return `#include "${id}"`;
+  }
+  if (/^\s*TEXT\b/.test(line)) {
+    return `TEXT ·${id}(SB), NOSPLIT, $0-0`;
+  }
+  if (/^\s*DATA\b/.test(line)) {
+    return `DATA ·${id}+0(SB)/8, $0`;
+  }
+  if (/^\s*GLOBL\b/.test(line)) {
+    return `GLOBL ·${id}(SB), NOPTR, $8`;
+  }
+  // Instructions and labels: asmfmt inserts a blank line before standalone
+  // comments, so keep the marker attached to an instruction.
+  return `\tNOP //${id}`;
+}
+
+function goMaskMarker(id, line) {
+  // Top-level Go declarations start in column 0. A comment in their place
+  // makes gofmt insert a blank line before it, so mirror the declaration kind.
+  const match = /^(func|var|const|type)\b/.exec(line);
+  switch (match && match[1]) {
+    case 'func':
+      return `func ${id}() {}`;
+    case 'var':
+      return `var ${id} = 0`;
+    case 'const':
+      return `const ${id} = 0`;
+    case 'type':
+      return `type ${id} int`;
+  }
+  if (/^import\b/.test(line)) {
+    return `import "${id}"`;
+  }
+  // An import spec inside a block: keep its path so gofmt sorts it in place
+  // and keeps the blank line between import groups, and append the marker.
+  if (/^\s*((?:[A-Za-z_][A-Za-z0-9_]*|\.)\s+)?"[^"]*"\s*$/.test(line)) {
+    return `${/^\s*/.exec(line)[0]}${line.trim()} //${id}`;
+  }
+  return `//${id}`;
 }
 
 async function runAsmfmt(args, cwd) {
@@ -440,12 +504,14 @@ async function getInstructionNames(arch, gorootOverride) {
 
 module.exports = {
   architectureFor,
+  asmMaskMarker,
   findHeader,
   findMacro,
   formatGoText,
   formatText,
   getGoroot,
   getInstructionNames,
+  goMaskMarker,
   maskLines,
   parseInclude,
   resolveAsmfmt,

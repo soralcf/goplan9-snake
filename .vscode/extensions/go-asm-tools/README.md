@@ -28,7 +28,7 @@
 - **保存时自动格式化**：
   - `.s`：扩展通过 `onWillSaveTextDocument` 在每次保存前调用 `asmfmt`，包括 `files.autoSave: "afterDelay"` 的自动保存。因为 VS Code 原生 `formatOnSave` 会跳过 Auto Save，所以 `[go.asm]` 的 `editor.formatOnSave` 故意设为 `false`，由扩展的 save participant 统一处理，避免手动保存时双重格式化。
   - `.go`：同一 save participant 在每次保存前调用 `gofmt`，因此 Auto Save 也会格式化。`[go]` 的 `editor.formatOnSave` 同样设为 `false`，避免与 Go 扩展在手动保存时重复格式化。gopls 目前不提供 on-type/range formatting，所以格式化发生在保存时（手动或自动），而不是每次按键。
-  - Auto Save 与手动保存的区别：Auto Save（`afterDelay`/失焦）会**保护光标和选区所在行**，这些行整行原样保留，避免打字中途被 `asmfmt`/`gofmt` 改写（例如尾随逗号、空格或制表符被吞掉）；手动保存（`Cmd+S`）和 `Format Document` 会格式化整篇，包括光标行。`.s` 和 `.go` 规则一致。
+  - Auto Save 与手动保存的区别：Auto Save（`afterDelay`/失焦）会**保护光标和选区所在行**，这些行整行原样保留，避免打字中途被 `asmfmt`/`gofmt` 改写（例如尾随逗号、空格或制表符被吞掉）；手动保存（`Cmd+S`）和 `Format Document` 会格式化整篇，包括光标行。`.s` 和 `.go` 规则一致。在最后一行输入时文件暂时没有结尾换行，Auto Save 也不会补上它，避免正在输入的行被换行拆开。
   - 仍然可以手动执行 `Format Document`。
 - **定义跳转**：
   - `#include "textflag.h"` → `$GOROOT/pkg/include/textflag.h`（不存在时回退到 `$GOROOT/src/runtime/textflag.h`）。

@@ -308,7 +308,7 @@ async function formattingEdits(document, protectedLines) {
   const masked = tooling.maskLines(
     before,
     protectedLines || [],
-    (id) => `\tNOP //${id}`
+    tooling.asmMaskMarker
   );
   let after;
   try {
@@ -340,7 +340,11 @@ class AsmFormatter {
 async function goFormattingEdits(document, protectedLines) {
   const before = document.getText();
   const version = document.version;
-  const masked = tooling.maskLines(before, protectedLines || []);
+  const masked = tooling.maskLines(
+    before,
+    protectedLines || [],
+    tooling.goMaskMarker
+  );
   let after;
   try {
     after = await tooling.formatGoText(masked.text);
