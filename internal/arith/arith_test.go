@@ -33,4 +33,27 @@ func TestAdd(t *testing.T) {
 	}
 }
 
-// TODO: TestClamp, TestAbsDiff, TestSumTo.
+func TestClamp(t *testing.T) {
+	tests := []struct {
+		name      string
+		v, lo, hi int32
+		want      int32
+	}{
+		{"loeqhi", 0, 1, 1, 1},
+		{"logthi", 0, 3, 1, 1},
+		{"vltlo", 0, 1, 3, 1},
+		{"vgthi", 4, 1, 3, 3},
+		{"normal", 2, 1, 3, 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Clamp(tt.v, tt.lo, tt.hi); got != tt.want {
+				t.Errorf("Clamp(%d, %d, %d) = %d, want %d", tt.v, tt.lo, tt.hi, got, tt.want)
+			}
+		})
+	}
+
+}
+
+// TODO: TestAbsDiff, TestSumTo.
