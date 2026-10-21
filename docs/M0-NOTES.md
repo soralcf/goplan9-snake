@@ -4,7 +4,7 @@
 
 ### 初始化
 
-- go mod init goplan9-sanke
+- go mod init goplan9snake（最初误拼为 `goplan9-sanke`，2026-10-21 修正）
 
 ### 编写代码
 

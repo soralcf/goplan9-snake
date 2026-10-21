@@ -1,4 +1,4 @@
-# goplan9-sanke
+# goplan9-snake
 
 用 Go Plan 9 汇编（darwin/arm64）从零实现一个自动寻路的 CLI 贪食蛇。程序启动后无需输入：蛇自动吃食物，最终占满整个棋盘。
 

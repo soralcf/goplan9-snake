@@ -11,7 +11,7 @@
 - macOS 27.0.1，Apple Silicon（arm64）。
 - Go 1.27.2 darwin/arm64。
 - `dlv` 已安装；`asmfmt` 未安装（可选安装）。
-- 工作目录：`/Users/welkin/me/soralcf/learning/goplan9-sanke`。
+- 工作目录：`/Users/welkin/me/soralcf/learning/goplan9-snake`。
 
 为了不让计划建立在猜测上，以下事实已经用临时探针验证：
 
