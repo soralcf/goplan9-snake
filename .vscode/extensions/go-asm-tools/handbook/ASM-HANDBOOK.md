@@ -433,6 +433,8 @@ ARM64 是小端：`$0x6f6c6c6568` 的低字节先出现在低地址，对应字�
 | 移位操作数 | `R1<<2`、`R1>>22`、`R1->11` | 左移、逻辑右移、算术右移 |
 | 扩展操作数 | `R2.SXTH`、`R2.UXTH`、`R1.SXTX` | 符号/零扩展后参与运算 |
 
+表中的符号地址、基址 + 偏移、基址 + 变址、前/后索引写回和寄存器对都是**内存地址形式**，只有搬运指令（`MOV*`、`LDP`/`STP`）接受；运算、比较指令不能直接使用。移位和扩展操作数是寄存器修饰，可以参与运算。完整规则见 7.5 节。
+
 ### 7.2 操作数顺序规则
 
 Go arm64 汇编与 GNU ARM64 汇编的操作数顺序不同：**大多数指令按“源, …, 目标”排列，目标在最后**。
@@ -478,6 +480,55 @@ STP  (R3, R4), 16(R2) // 一次存储两个 64 位值
 MOVD.P 8(R2), R3      // 后索引：加载后 R2 += 8
 MOVD.W 8(R2), R3      // 前索引：R2 += 8 后加载
 ```
+
+### 7.5 指令与操作数类型的匹配
+
+ARM64 是 load/store 架构：**运算只在寄存器之间进行，内存只能由搬运指令读写**。Go 汇编不会自动把 `x+0(FP)` 解引用成参数值，它只是一个地址写法。
+
+| 指令类别 | 允许的操作数 | 示例 |
+|---|---|---|
+| 运算与比较 | 寄存器 + 寄存器，或寄存器 + 立即数 | `ADD R1, R0`、`CMP $0, R0` |
+| 加载与存储 | 寄存器 + 地址形式 | `MOVW 8(R1), R0`、`MOVD R0, 16(R1)` |
+| 分支 | 标签、立即数偏移或寄存器 | `B label`、`CBZ R0, label` |
+
+`CMP`、`ADD`、`SUB`、`MUL`、`EOR`、`LSL` 等运算指令不能直接使用 `x+0(FP)`、`8(R1)`、`(R1)(R2<<2)` 这类地址操作数：
+
+```asm
+MOVW x+0(FP), R0      // 合法：加载到寄存器
+CMP  R1, R0           // 合法：寄存器 vs 寄存器
+CMP  $0, R0           // 合法：寄存器 vs 立即数
+CMP  x+0(FP), R0      // 非法：CMP 不接受内存/FP 操作数
+ADD  8(R1), R0        // 非法：ADD 不接受内存操作数
+```
+
+汇编器报 `illegal combination`，并列出每个操作数的种类：
+
+```text
+asm: illegal combination: CMP x(FP), R0 PSAUTO_8 REG NONE NONE NONE
+asm: illegal combination: ADD (R1), R0 ZOREG NONE NONE REG NONE
+```
+
+`PSAUTO_8` 表示伪寄存器的参数地址，`ZOREG` 表示基址寻址，`REG` 表示寄存器，`NONE` 表示该位置为空；报错的含义是“指令编码模板不接受这个位置的这种操作数”。
+
+比较或计算参数时，先加载到寄存器：
+
+```asm
+MOVW x+0(FP), R0
+MOVW y+4(FP), R1
+CMP  R1, R0           // 比较 R0 与 R1
+```
+
+规则：
+
+- `FP`、`SB`、`SP` 是伪寄存器（见 5.1 节），只是地址锚点，不能参与运算或比较。
+- 立即数只能是常数；`CMP x+0(FP), R0` 这类写法不成立。
+- 索引寻址 `(R1)(R2<<2)` 和符号地址 `·name(SB)` 同样只用于搬运指令。
+- 与常量比较用 `CMP $imm, Rn`，不需要先把常量装入寄存器。
+- 移位（`R1<<2`）和扩展（`R2.SXTH`）是寄存器修饰，不是内存操作数，可用于部分运算指令。
+
+记忆规则：**除了搬运指令，其他指令只认寄存器和立即数。**
+
+拿不准某条指令接受哪种操作数时，写一个三行的临时 `TEXT` 跑 `go build`，看是否报 `illegal combination`；也可以翻 `$GOROOT/src` 下的 `*_arm64.s`，对照标准库的写法。诊断条目见第 14 章。
 
 ## 8. 指令参考
 
@@ -819,6 +870,7 @@ Delve 常用命令：
 | `wrong argument size` | `$帧-参数` 的参数大小与 Go 声明不符 | 按字节重算参数 + 返回值，运行 `go vet ./...` | 通用 |
 | `invalid offset` / 参数名不匹配 | `a+0(FP)` 的名字或偏移与 Go 声明不一致 | 对照 Go 函数签名；名字必须完全一致 | 通用 |
 | `invalid instruction` / `illegal combination` | 操作数顺序、宽度后缀或寄存器组合错误 | 查第 7–9 章；用最小例子验证 | arm64 |
+| `illegal combination` 且操作数含 `(FP)`、`(R1)` 等 | 给运算/比较指令传了内存或伪寄存器操作数 | 先用 `MOV*` 装入寄存器；见 7.5 节 | arm64 |
 | `unexpected EOF` | 标签、括号或 `.P`/`.W` 后缀不完整 | 检查标签定义和操作数 | 通用 |
 | `relocation target ... not defined` | 符号拼写错误或缺少 `.s` 实现 | 用 `go tool nm` 查符号；确认文件名后缀 | 通用 |
 | `missing function body` | Go 有声明但没有汇编实现 | 检查 `TEXT ·Name(SB)` | 通用 |
@@ -871,6 +923,7 @@ Delve 常用命令：
 | GLOBL | Global symbol | 全局符号声明 |
 | DATA | Data symbol | 数据初始化声明 |
 | GC | Garbage Collector | 垃圾回收器 |
+| Load/Store | Load/Store architecture | 加载/存储架构：运算只在寄存器间进行，内存由搬运指令访问 |
 | NOPTR | No Pointers | 不含指针 |
 | NOSPLIT | No Stack Split | 不插入栈增长检查 |
 | NOFRAME | No Frame | 不生成帧序言 |
