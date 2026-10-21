@@ -116,7 +116,7 @@ go tool objdump -s 'main\.Add' ./snake | head -30
 
 | 函数 | 用途 |
 |---|---|
-| `cellIndex(x, y, w int32) int32` | `y*w + x`，供棋盘索引 |
+| `CellIndex(x, y, w int32) int32` | `y*w + x`，供棋盘索引 |
 | `clamp(v, lo, hi int32) int32` | 边界限制 |
 | `absDiff(a, b int32) int32` | 绝对差 |
 | `sumTo(n int64) int64` | 循环求和，练分支 |
@@ -127,7 +127,7 @@ go tool objdump -s 'main\.Add' ./snake | head -30
 要求：
 
 - 每个函数都有表驱动测试或性质测试。
-- `cellIndex`、`xorshift64` 至少跑 100k 组随机输入，与测试文件里的 Go 参考实现对拍。
+- `CellIndex`、`Xorshift64` 至少跑 100k 组随机输入，与测试文件里的 Go 参考实现对拍。
 - BSS 计数器在测试之间通过 `Reset` 清零；测试不要用 `t.Parallel()`（共享 BSS）。
 - 不使用 Go 实现作为产品路径的兜底。
 
@@ -136,7 +136,8 @@ go tool objdump -s 'main\.Add' ./snake | head -30
 ```bash
 go test ./... -count=1
 go vet ./...
-go tool objdump -s 'main\.cellIndex' ./snake | head -20
+go test -c ./internal/grid -o /tmp/grid.test
+go tool objdump -s 'goplan9snake/internal/grid\.CellIndex' /tmp/grid.test | head -20
 ```
 
 - [ ] 所有函数测试通过；随机对拍无差异。

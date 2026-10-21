@@ -1,3 +1,3 @@
 package grid
 
-func Index(x, y, w int32) int32
+func CellIndex(x, y, w int32) int32
