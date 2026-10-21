@@ -64,13 +64,29 @@ const INSTRUCTION_DOCS = {
   AND: 'Bitwise AND.',
   ORR: 'Bitwise OR.',
   EOR: 'Bitwise exclusive OR.',
-  CMP: 'Compare.',
-  B: 'Branch.',
-  BL: 'Branch with link.',
-  BEQ: 'Branch if equal.',
-  BNE: 'Branch if not equal.',
-  CBZ: 'Compare and branch if zero.',
-  CBNZ: 'Compare and branch if non-zero.',
+  CMP: 'Compare: `CMP Rm, Rn` sets flags from Rn - Rm, so Rn is the value being tested.',
+  B: 'Unconditional branch (alias of JMP).',
+  BL: 'Branch with link: save the return address in LR, then branch (alias of CALL).',
+  BEQ: 'Branch if equal (Z set).',
+  BNE: 'Branch if not equal (Z clear).',
+  BCS: 'Branch if carry set: unsigned higher or same (>=). Alias of BHS.',
+  BCC: 'Branch if carry clear: unsigned lower (<). Alias of BLO.',
+  BHS: 'Branch if unsigned higher or same (>=). Alias of BCS.',
+  BLO: 'Branch if unsigned lower (<). Alias of BCC.',
+  BHI: 'Branch if unsigned higher (>).',
+  BLS: 'Branch if unsigned lower or same (<=).',
+  BGE: 'Branch if signed greater than or equal (>=).',
+  BLT: 'Branch if signed less than (<).',
+  BGT: 'Branch if signed greater than (>).',
+  BLE: 'Branch if signed less than or equal (<=).',
+  BMI: 'Branch if minus (N set).',
+  BPL: 'Branch if plus or zero (N clear).',
+  BVS: 'Branch if overflow set.',
+  BVC: 'Branch if overflow clear.',
+  CBZ: 'Compare and branch if zero: `CBZ Rn, label`.',
+  CBNZ: 'Compare and branch if non-zero: `CBNZ Rn, label`.',
+  TBZ: 'Test one bit and branch if it is zero: `TBZ $bit, Rn, label`.',
+  TBNZ: 'Test one bit and branch if it is non-zero: `TBNZ $bit, Rn, label`.',
   LDP: 'Load pair.',
   STP: 'Store pair.',
   FMOVD: 'Move a double-precision floating-point value.',
@@ -518,8 +534,11 @@ class AsmCompletionProvider {
         vscode.CompletionItemKind.Snippet
       );
       item.detail = 'Go assembly include';
-      item.insertText = '#include "${1|textflag.h,funcdata.h,go_asm.h|}"';
-      item.insertTextFormat = vscode.InsertTextFormat.Snippet;
+      // The snippet format is carried by SnippetString; the insertTextFormat
+      // enum was removed from the extension API in VS Code 1.143.
+      item.insertText = new vscode.SnippetString(
+        '#include "${1|textflag.h,funcdata.h,go_asm.h|}"'
+      );
       item.range = new vscode.Range(
         position.line,
         Math.max(0, hash),
@@ -659,8 +678,7 @@ class AsmCompletionProvider {
         vscode.CompletionItemKind.Snippet
       );
       item.detail = snippet.detail;
-      item.insertText = snippet.insertText;
-      item.insertTextFormat = vscode.InsertTextFormat.Snippet;
+      item.insertText = new vscode.SnippetString(snippet.insertText);
       item.range = range;
       item.sortText = `0${snippet.label}`;
       items.push(item);

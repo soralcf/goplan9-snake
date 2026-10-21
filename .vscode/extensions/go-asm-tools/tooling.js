@@ -357,7 +357,7 @@ const fallbackInstructions = {
     'MOVD', 'MOVW', 'MOVH', 'MOVB', 'MOVBU', 'MOVHU', 'MOVWU',
     'ADD', 'ADDS', 'SUB', 'SUBS', 'MUL', 'MADD', 'MSUB', 'SDIV', 'UDIV',
     'AND', 'ANDS', 'ORR', 'EOR', 'BIC', 'MVN', 'LSL', 'LSR', 'ASR', 'ROR',
-    'CMP', 'CMN', 'TST', 'B', 'BL', 'BR', 'BLR', 'BEQ', 'BNE', 'BCS',
+    'CMP', 'CMN', 'TST', 'B', 'BL', 'BEQ', 'BNE', 'BCS',
     'BCC', 'BMI', 'BPL', 'BVS', 'BVC', 'BHI', 'BLS', 'BGE', 'BLT', 'BGT',
     'BLE', 'CBZ', 'CBNZ', 'TBZ', 'TBNZ', 'RET', 'NOP', 'LDP', 'STP',
     'LDR', 'STR', 'LDRB', 'STRB', 'LDRH', 'STRH', 'LDAR', 'STLR',
@@ -399,6 +399,13 @@ const ARCH_DIRS = {
 };
 
 const GENERIC_INSTRUCTIONS = ['RET', 'NOP', 'WORD', 'DWORD', 'QUAD'];
+
+// Mnemonics the assembler accepts that are not arch-specific: B and BL are
+// aliases of the shared JMP and CALL opcodes.
+const ARCH_ALIASES = {
+  arm64: ['B', 'BL'],
+};
+
 const instructionCache = new Map();
 
 const ARCH_PATTERNS = KNOWN_ARCHES.map((arch) => ({
@@ -453,6 +460,27 @@ function fallbackFor(key) {
   return fallbackInstructions[key] || GENERIC_INSTRUCTIONS;
 }
 
+// The per-architecture anames.go starts at A_ARCHSPECIFIC, so opcodes shared
+// by every architecture (CALL, JMP, RET, ...) only appear in util.go. Reading
+// them keeps arm64's B/BL aliases and the common pseudo-instructions complete.
+function readCommonInstructionNames(goroot) {
+  try {
+    const source = fs.readFileSync(
+      path.join(goroot, 'src', 'cmd', 'internal', 'obj', 'util.go'),
+      'utf8'
+    );
+    const block = /var Anames = \[\]string\{([\s\S]*?)\n\}/.exec(source);
+    if (!block) {
+      return [];
+    }
+    return [...block[1].matchAll(/"([A-Z][A-Z0-9_]*)"/g)]
+      .map((match) => match[1])
+      .filter((name) => name !== 'XXX');
+  } catch {
+    return [];
+  }
+}
+
 async function getInstructionNames(arch, gorootOverride) {
   const key = arch || 'generic';
   const dir = ARCH_DIRS[key];
@@ -491,7 +519,14 @@ async function getInstructionNames(arch, gorootOverride) {
       const names = [...source.matchAll(/"([A-Z][A-Z0-9_]*)"/g)]
         .map((match) => match[1])
         .filter((name) => name !== 'LAST');
-      const result = [...new Set([...names, ...GENERIC_INSTRUCTIONS])].sort();
+      const result = [
+        ...new Set([
+          ...names,
+          ...readCommonInstructionNames(goroot),
+          ...(ARCH_ALIASES[key] || []),
+          ...GENERIC_INSTRUCTIONS,
+        ]),
+      ].sort();
       const final = result.length > 0 ? result : fallback;
       instructionCache.set(cacheKey, final);
       return final;
