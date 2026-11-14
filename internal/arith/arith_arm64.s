@@ -35,7 +35,17 @@ vgthi:
 
 // a+0(FP) b+4(FP) ret+8(FP)
 TEXT ·AbsDiff(SB), NOSPLIT, $0-12
-	MOVW ZR, ret+8(FP) // 占位
+	MOVW a+0(FP), R1
+	MOVW b+4(FP), R2
+	SUBW R1, R2
+	CMPW $0, R2
+	BLT  negative
+	MOVW R2, ret+8(FP)
+	RET
+
+negative:
+	NEGW R2, R2
+	MOVW R2, ret+8(FP)
 	RET
 
 // n+0(FP) ret+8(FP)

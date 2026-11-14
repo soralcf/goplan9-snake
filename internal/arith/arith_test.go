@@ -71,4 +71,54 @@ func TestClamp(t *testing.T) {
 	}
 }
 
-// TODO: TestAbsDiff, TestSumTo.
+// TestAbsDiff 钉住 AbsDiff 的契约：结果按 32 位二补码回绕计算。
+//
+// 常规与符号用例验证 |a-b| 的定义；极值用例验证三个反直觉角落：
+//   - MinInt32 取负仍回绕到 MinInt32，所以真实差为 2^31 时会得到负数；
+//   - 双极值相减的真实差是 2^32-1，截断成 -1，取绝对值后为 1；
+//   - 真实差恰好等于 MaxInt32 时仍然精确，不触发回绕。
+//
+// 随机对拍几乎抽不到这些角落，因此必须由固定用例覆盖。
+func TestAbsDiff(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b int32
+		want int32
+	}{
+		// 常规与符号：|a-b| 的基本定义。
+		{"equal positive", 1, 1, 0},
+		{"equal negative", -1, -1, 0},
+		{"equal zero", 0, 0, 0},
+		{"a below b", 1, 2, 1},
+		{"a above b", 2, 1, 1},
+		{"opposite signs", -7, 3, 10},
+
+		// 精确边界：真实差值装得下 int32 时必须给出精确结果。
+		{"max int32 exact", math.MaxInt32, 0, math.MaxInt32},
+		{"min int32 minus negative one exact", math.MinInt32, -1, math.MaxInt32},
+
+		// MinInt32 取负按 32 位回绕，结果仍是 MinInt32。
+		{"min minus zero wraps to itself", math.MinInt32, 0, math.MinInt32},
+		{"zero minus min wraps to itself", 0, math.MinInt32, math.MinInt32},
+		{"equal min int32", math.MinInt32, math.MinInt32, 0},
+
+		// 真实差 2^32-1 截断成 -1，取绝对值后为 1。
+		{"max minus min wraps to one", math.MaxInt32, math.MinInt32, 1},
+		{"min minus max wraps to one", math.MinInt32, math.MaxInt32, 1},
+
+		// 32 位截断会翻转符号：精确差是 +2^31 / -(2^31+1) 时，结果与精确值不同。
+		// 其中 min minus one 能抓住“先用 64 位精确相减、再取绝对值”的实现错误。
+		{"max minus negative one wraps to min", math.MaxInt32, -1, math.MinInt32},
+		{"min minus one wraps to max", math.MinInt32, 1, math.MaxInt32},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := AbsDiff(tt.a, tt.b); got != tt.want {
+				t.Errorf("AbsDiff(%d, %d) = %d, want %d", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}
+
+// TODO: TestSumTo.
