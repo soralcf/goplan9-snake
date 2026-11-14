@@ -468,6 +468,16 @@ BHI  greater_8       // 无符号 R3 > 8 时跳转
 
 寄存器到寄存器时，宽度后缀决定写入宽度；32 位写入会清零高 32 位。做有符号 32 位运算时，确认符号扩展行为，必要时显式使用 `SXTW` 或 `MOVW` 加载。
 
+算术、逻辑、比较和条件选择指令还可以带宽度/标志后缀：
+
+| 后缀 | 含义 | 例子 |
+|---|---|---|
+| `W` | 32 位形式；只处理低 32 位，写入型指令会清零目标寄存器的高 32 位 | `NEGW`、`ADDSW`、`CMPW`、`CSELW` |
+| `S` | 同时设置条件标志 N/Z/C/V | `NEGS`、`ADDS`、`SUBS`、`ANDS` |
+| `SW` | 32 位形式并设置条件标志 | `NEGSW`、`ADDSW`、`SUBSW`、`BICSW` |
+
+`NEG` 是 64 位取负，`NEGW` 是 32 位取负，`NEGSW` 是 32 位取负并设置标志。不是所有指令都有这些变体：例如 `TBZ`/`TBNZ` 没有 W 形式；`MOVZ`/`MOVK`/`MOVN` 有 `MOVZW`/`MOVKW`/`MOVNW`，但源码里通常写 `MOVW`/`MOVD` 让汇编器选择。以本机 `anames.go` 和补全列表为准。
+
 ### 7.4 加载与存储
 
 ```asm
@@ -557,35 +567,37 @@ CMP  R1, R0           // 比较 R0 与 R1
 
 | 指令 | 英文展开 | 说明 |
 |---|---|---|
-| `ADD` / `ADDW` | Add | 加；`ADDS` 同时设置标志 |
-| `SUB` / `SUBW` | Subtract | 减；`SUBS` 同时设置标志 |
+| `ADD` / `ADDW` / `ADDS` / `ADDSW` | Add / Add and Set flags | 加；`ADDS` 同时设置标志；`W` 为 32 位形式 |
+| `SUB` / `SUBW` / `SUBS` / `SUBSW` | Subtract / Subtract and Set flags | 减；`SUBS` 同时设置标志；`W` 为 32 位形式 |
 | `MUL` / `MULW` | Multiply | 乘；溢出回绕，不陷入 |
-| `MADD` | Multiply-Add | `MADD Rm, Ra, Rn, Rd` 对应 `Rd = Ra + Rn*Rm` |
-| `MSUB` | Multiply-Subtract | 乘减 |
-| `SDIV` | Signed Divide | 有符号除；除数为 0 时结果为 0，不陷入 |
-| `UDIV` | Unsigned Divide | 无符号除 |
-| `AND` / `ANDW` | Bitwise AND | 按位与；`ANDS` 设置标志 |
+| `MADD` / `MADDW` | Multiply-Add | `MADD Rm, Ra, Rn, Rd` 对应 `Rd = Ra + Rn*Rm` |
+| `MSUB` / `MSUBW` | Multiply-Subtract | 乘减 |
+| `SDIV` / `SDIVW` | Signed Divide | 有符号除；除数为 0 时结果为 0，不陷入 |
+| `UDIV` / `UDIVW` | Unsigned Divide | 无符号除 |
+| `AND` / `ANDW` / `ANDS` / `ANDSW` | Bitwise AND / AND and Set flags | 按位与；`ANDS` 设置标志 |
 | `ORR` / `ORRW` | Bitwise OR | 按位或 |
 | `EOR` / `EORW` | Exclusive OR | 按位异或 |
-| `BIC` | Bit Clear | `BIC Rm, Rn, Rd` 即 `Rd = Rn &^ Rm` |
-| `MVN` | Move Not | 按位取反 |
-| `NEG` | Negate | 取负 |
-| `LSL` | Logical Shift Left | 左移 |
-| `LSR` | Logical Shift Right | 逻辑右移 |
-| `ASR` | Arithmetic Shift Right | 算术右移 |
-| `ROR` | Rotate Right | 循环右移 |
-| `TST` | Test | 按位测试，等价于丢弃结果的 `ANDS` |
+| `BIC` / `BICW` / `BICS` / `BICSW` | Bit Clear / Bit Clear and Set flags | `BIC Rm, Rn, Rd` 即 `Rd = Rn &^ Rm`；`BICS` 设置标志 |
+| `MVN` / `MVNW` | Move Not | 按位取反 |
+| `NEG` / `NEGW` / `NEGS` / `NEGSW` | Negate / Negate and Set flags | 取负；`NEGW` 为 32 位取负，`NEGSW` 同时设置标志 |
+| `LSL` / `LSLW` | Logical Shift Left | 左移 |
+| `LSR` / `LSRW` | Logical Shift Right | 逻辑右移 |
+| `ASR` / `ASRW` | Arithmetic Shift Right | 算术右移 |
+| `ROR` / `RORW` | Rotate Right | 循环右移 |
+| `TST` / `TSTW` | Test | 按位测试，等价于丢弃结果的 `ANDS` |
+
+`W` 后缀表示 32 位形式；`S` 后缀表示设置条件标志；两者可以组合，例如 `NEGSW`。写 32 位运算时优先用 W 形式，避免把 64 位结果误当成 32 位。
 
 ### 8.3 比较与分支
 
 | 指令 | 英文展开 | 说明 |
 |---|---|---|
-| `CMP` | Compare | 计算 `b - a` 并设置标志 |
-| `CMN` | Compare Negative | 计算 `b + a` 并设置标志 |
-| `CCMP` | Conditional Compare | 条件比较，用于链式条件 |
-| `CCMN` | Conditional Compare Negative | 条件比较（加法形式） |
-| `CBZ` | Compare and Branch on Zero | `R0 == 0` 时跳转 |
-| `CBNZ` | Compare and Branch on Non-Zero | `R0 != 0` 时跳转 |
+| `CMP` / `CMPW` | Compare | 计算 `b - a` 并设置标志；`CMPW` 只比较低 32 位 |
+| `CMN` / `CMNW` | Compare Negative | 计算 `b + a` 并设置标志 |
+| `CCMP` / `CCMPW` | Conditional Compare | 条件比较，用于链式条件 |
+| `CCMN` / `CCMNW` | Conditional Compare Negative | 条件比较（加法形式） |
+| `CBZ` / `CBZW` | Compare and Branch on Zero | `R0 == 0` 时跳转；`CBZW` 只测试低 32 位 |
+| `CBNZ` / `CBNZW` | Compare and Branch on Non-Zero | `R0 != 0` 时跳转；`CBNZW` 只测试低 32 位 |
 | `TBZ` | Test Bit and Branch if Zero | 指定位为 0 时跳转 |
 | `TBNZ` | Test Bit and Branch if Non-Zero | 指定位为 1 时跳转 |
 | `B` | Branch | 无条件跳转 |
@@ -594,23 +606,27 @@ CMP  R1, R0           // 比较 R0 与 R1
 | `CALL` | Call | 调用寄存器地址 |
 | `RET` | Return | 返回 |
 
+`TBZ`/`TBNZ` 没有 W 形式；`CMPW`/`CBZW` 等 W 形式只处理低 32 位。
+
 `B 2(PC)` 表示从当前分支指令向后数 2 条指令的位置；源码中常用于跳过下一条指令。Go 文档中寄存器 `br` 的规范写法是 `JMP`，寄存器 `blr` 的规范写法是 `CALL`。
 
 ### 8.4 条件选择
 
 | 指令 | 英文展开 | 说明 |
 |---|---|---|
-| `CSEL` | Conditional Select | `CSEL cond, Rn, Rm, Rd`：条件成立选 `Rn`，否则选 `Rm` |
-| `CSET` | Conditional Set | 条件成立写 1，否则写 0 |
-| `CSINC` | Conditional Select Increment | 条件选择并对未选中值加 1 |
-| `CSNEG` | Conditional Select Negate | 条件选择并对未选中值取负 |
+| `CSEL` / `CSELW` | Conditional Select | `CSEL cond, Rn, Rm, Rd`：条件成立选 `Rn`，否则选 `Rm` |
+| `CSET` / `CSETW` | Conditional Set | 条件成立写 1，否则写 0 |
+| `CSETM` / `CSETMW` | Conditional Set Mask | 条件成立写全 1，否则写 0 |
+| `CSINC` / `CSINCW` | Conditional Select Increment | 条件选择并对未选中值加 1 |
+| `CSINV` / `CSINVW` | Conditional Select Invert | 条件选择并对未选中值按位取反 |
+| `CSNEG` / `CSNEGW` | Conditional Select Negate | 条件选择并对未选中值取负 |
 
 ```asm
 CSEL GT, R0, R19, R1   // 若 GT 则 R1 = R0，否则 R1 = R19
 CSET EQ, R2            // 若 EQ 则 R2 = 1，否则 0
 ```
 
-条件选择不产生分支，适合替代短小的 `if/else`。
+条件选择不产生分支，适合替代短小的 `if/else`。带 `W` 的 `CSELW`/`CSETW` 等只写 32 位结果。
 
 ## 9. 条件码与分支
 
@@ -951,12 +967,20 @@ Delve 常用命令：
 
 ### 16.3 arm64 指令
 
+`W` 后缀表示 32 位形式（如 `NEGW`、`CMPW`、`CSELW`），`S` 后缀表示设置条件标志（如 `NEGS`），两者可以组合为 `NEGSW`。下表列出常用基名和主要变体；完整列表见第 8 章。
+
 | 缩写 | 英文全称 | 说明 |
 |---|---|---|
 | ADD | Add | 加 |
 | ADDS | Add and Set flags | 加法并设置标志 |
+| ADDSW | Add and Set flags, 32-bit | 32 位加法并设置标志 |
+| ADDW | Add, 32-bit | 32 位加法 |
 | AND | Bitwise AND | 按位与 |
+| ANDS | Bitwise AND and Set flags | 按位与并设置标志 |
+| ANDSW | Bitwise AND and Set flags, 32-bit | 32 位按位与并设置标志 |
+| ANDW | Bitwise AND, 32-bit | 32 位按位与 |
 | ASR | Arithmetic Shift Right | 算术右移 |
+| ASRW | Arithmetic Shift Right, 32-bit | 32 位算术右移 |
 | B | Branch | 分支 |
 | BCC | Branch if Carry Clear | 无符号小于 |
 | BCS | Branch if Carry Set | 无符号大于等于 |
@@ -966,6 +990,8 @@ Delve 常用命令：
 | BHI | Branch if HIgher | 无符号大于 |
 | BHS | Branch if Higher or Same | 无符号大于等于 |
 | BIC | Bit Clear | 位清除 |
+| BICSW | Bit Clear and Set flags, 32-bit | 32 位位清除并设置标志 |
+| BICW | Bit Clear, 32-bit | 32 位位清除 |
 | BL | Branch with Link | 带链接分支（调用） |
 | BLE | Branch if Less or Equal | 有符号小于等于 |
 | BLO | Branch if LOwer | 无符号小于 |
@@ -977,20 +1003,37 @@ Delve 常用命令：
 | BVC | Branch if oVerflow Clear | 溢出清除 |
 | BVS | Branch if oVerflow Set | 溢出设置 |
 | CBZ | Compare and Branch on Zero | 为零则分支 |
+| CBZW | Compare and Branch on Zero, 32-bit | 32 位为零则分支 |
 | CBNZ | Compare and Branch on Non-Zero | 非零则分支 |
+| CBNZW | Compare and Branch on Non-Zero, 32-bit | 32 位非零则分支 |
 | CCMN | Conditional Compare Negative | 条件比较（加法） |
 | CCMP | Conditional Compare | 条件比较 |
 | CMP | Compare | 比较 |
+| CMPW | Compare, 32-bit | 32 位比较 |
 | CMN | Compare Negative | 比较负数（加法形式） |
+| CMNW | Compare Negative, 32-bit | 32 位比较负数 |
 | CSEL | Conditional Select | 条件选择 |
+| CSELW | Conditional Select, 32-bit | 32 位条件选择 |
 | CSET | Conditional Set | 条件置位 |
+| CSETM | Conditional Set Mask | 条件置位为全 1 |
+| CSETMW | Conditional Set Mask, 32-bit | 32 位条件置位为全 1 |
+| CSETW | Conditional Set, 32-bit | 32 位条件置位 |
 | CSINC | Conditional Select Increment | 条件选择并自增 |
+| CSINCW | Conditional Select Increment, 32-bit | 32 位条件选择并自增 |
+| CSINV | Conditional Select Invert | 条件选择并取反 |
+| CSINVW | Conditional Select Invert, 32-bit | 32 位条件选择并取反 |
 | CSNEG | Conditional Select Negate | 条件选择并取负 |
+| CSNEGW | Conditional Select Negate, 32-bit | 32 位条件选择并取负 |
 | EOR | Exclusive OR | 异或 |
+| EORW | Exclusive OR, 32-bit | 32 位异或 |
 | LDP | Load Pair | 加载寄存器对 |
+| LDPW | Load Pair, 32-bit | 32 位加载寄存器对 |
 | LSL | Logical Shift Left | 逻辑左移 |
+| LSLW | Logical Shift Left, 32-bit | 32 位逻辑左移 |
 | LSR | Logical Shift Right | 逻辑右移 |
+| LSRW | Logical Shift Right, 32-bit | 32 位逻辑右移 |
 | MADD | Multiply-Add | 乘加 |
+| MADDW | Multiply-Add, 32-bit | 32 位乘加 |
 | MOVB | Move Byte | 字节移动 |
 | MOVBU | Move Byte Unsigned | 无符号字节移动 |
 | MOVD | Move Doubleword | 双字（64 位）移动 |
@@ -1002,21 +1045,34 @@ Delve 常用命令：
 | MOVWU | Move Word Unsigned | 无符号字移动 |
 | MOVZ | Move Zero | 写入半字并清零其余位 |
 | MSUB | Multiply-Subtract | 乘减 |
+| MSUBW | Multiply-Subtract, 32-bit | 32 位乘减 |
 | MUL | Multiply | 乘 |
+| MULW | Multiply, 32-bit | 32 位乘 |
 | MVN | Move Not | 按位取反 |
+| MVNW | Move Not, 32-bit | 32 位按位取反 |
 | NEG | Negate | 取负 |
+| NEGSW | Negate and Set flags, 32-bit | 32 位取负并设置标志 |
+| NEGW | Negate, 32-bit | 32 位取负 |
 | ORR | Bitwise OR | 按位或 |
+| ORRW | Bitwise OR, 32-bit | 32 位按位或 |
 | RET | Return | 返回 |
 | ROR | Rotate Right | 循环右移 |
+| RORW | Rotate Right, 32-bit | 32 位循环右移 |
 | SDIV | Signed Divide | 有符号除 |
+| SDIVW | Signed Divide, 32-bit | 32 位有符号除 |
 | STP | Store Pair | 存储寄存器对 |
+| STPW | Store Pair, 32-bit | 32 位存储寄存器对 |
 | SUB | Subtract | 减 |
 | SUBS | Subtract and Set flags | 减法并设置标志 |
+| SUBSW | Subtract and Set flags, 32-bit | 32 位减法并设置标志 |
+| SUBW | Subtract, 32-bit | 32 位减法 |
 | SVC | Supervisor Call | 管理员调用（系统调用指令） |
 | TBZ | Test Bit and Branch if Zero | 测试位为零则分支 |
 | TBNZ | Test Bit and Branch if Non-Zero | 测试位非零则分支 |
 | TST | Test | 按位测试 |
+| TSTW | Test, 32-bit | 32 位按位测试 |
 | UDIV | Unsigned Divide | 无符号除 |
+| UDIVW | Unsigned Divide, 32-bit | 32 位无符号除 |
 
 ### 16.4 系统调用、终端与工具
 
@@ -1053,3 +1109,11 @@ Delve 常用命令：
 本页由工作区扩展 `Go Assembly: Open Handbook` 从 `.vscode/extensions/go-asm-tools/handbook/ASM-HANDBOOK.md` 渲染。修改后重新执行该命令即可刷新；新增标题会自动进入左侧目录。手册中的项目链接（`docs/ROADMAP.md`、`docs/REFERENCES.md` 等）按工作区根目录解析。
 
 架构相关内容应标注 [通用]、[arm64]、[darwin] 或 [amd64]；新增缩写时优先在对应表格中补“英文展开”列，并在第 16 章登记。
+
+指令 hover 文档与 fallback 补全列表集中在同目录的 `instruction-data.js`。修改静态表或本手册第 8 章后，运行：
+
+```bash
+node .vscode/extensions/go-asm-tools/scripts/check-mnemonics.js
+```
+
+脚本会对照本机 Go 的 `anames.go` 检查 hover 文档、fallback 和本手册第 8 章的助记符，并确认项目 `.s` 中出现的助记符都有 hover 说明。

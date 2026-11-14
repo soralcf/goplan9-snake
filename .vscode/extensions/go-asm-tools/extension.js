@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const path = require('path');
 const vscode = require('vscode');
 const tooling = require('./tooling');
+const { instructionDoc } = require('./instruction-data');
 const { renderMarkdown } = require('./markdown');
 
 const selector = { language: 'go.asm', scheme: 'file' };
@@ -39,6 +40,7 @@ const FLAGS = {
 const REGISTER_DOCS = {
   FP: 'Frame pointer pseudo-register.',
   SP: 'Stack pointer.',
+  RSP: 'ARM64 hardware stack pointer (distinct from the `SP` pseudo-register).',
   SB: 'Static base pseudo-register.',
   PC: 'Program counter.',
   ZR: 'ARM64 zero register.',
@@ -46,55 +48,20 @@ const REGISTER_DOCS = {
   TLS: 'TLS pseudo-register.',
 };
 
-const INSTRUCTION_DOCS = {
-  MOVD: 'Move a doubleword (64-bit on ARM64).',
-  MOVW: 'Move a word.',
-  MOVH: 'Move a halfword.',
-  MOVB: 'Move a byte.',
-  MOVBU: 'Move an unsigned byte.',
-  MOVHU: 'Move an unsigned halfword.',
-  MOVWU: 'Move an unsigned word.',
-  ADD: 'Add.',
-  ADDS: 'Add and set flags.',
-  SUB: 'Subtract.',
-  SUBS: 'Subtract and set flags.',
-  MUL: 'Multiply.',
-  SDIV: 'Signed divide.',
-  UDIV: 'Unsigned divide.',
-  AND: 'Bitwise AND.',
-  ORR: 'Bitwise OR.',
-  EOR: 'Bitwise exclusive OR.',
-  CMP: 'Compare: `CMP Rm, Rn` sets flags from Rn - Rm, so Rn is the value being tested.',
-  B: 'Unconditional branch (alias of JMP).',
-  BL: 'Branch with link: save the return address in LR, then branch (alias of CALL).',
-  BEQ: 'Branch if equal (Z set).',
-  BNE: 'Branch if not equal (Z clear).',
-  BCS: 'Branch if carry set: unsigned higher or same (>=). Alias of BHS.',
-  BCC: 'Branch if carry clear: unsigned lower (<). Alias of BLO.',
-  BHS: 'Branch if unsigned higher or same (>=). Alias of BCS.',
-  BLO: 'Branch if unsigned lower (<). Alias of BCC.',
-  BHI: 'Branch if unsigned higher (>).',
-  BLS: 'Branch if unsigned lower or same (<=).',
-  BGE: 'Branch if signed greater than or equal (>=).',
-  BLT: 'Branch if signed less than (<).',
-  BGT: 'Branch if signed greater than (>).',
-  BLE: 'Branch if signed less than or equal (<=).',
-  BMI: 'Branch if minus (N set).',
-  BPL: 'Branch if plus or zero (N clear).',
-  BVS: 'Branch if overflow set.',
-  BVC: 'Branch if overflow clear.',
-  CBZ: 'Compare and branch if zero: `CBZ Rn, label`.',
-  CBNZ: 'Compare and branch if non-zero: `CBNZ Rn, label`.',
-  TBZ: 'Test one bit and branch if it is zero: `TBZ $bit, Rn, label`.',
-  TBNZ: 'Test one bit and branch if it is non-zero: `TBNZ $bit, Rn, label`.',
-  LDP: 'Load pair.',
-  STP: 'Store pair.',
-  FMOVD: 'Move a double-precision floating-point value.',
-  FADD: 'Floating-point add.',
-  RET: 'Return from the function.',
-};
+const SIMPLE_BRANCH_LINE =
+  /^\s*(?:B|BL|BEQ|BNE|BCS|BCC|BMI|BPL|BVS|BVC|BHI|BLS|BGE|BLT|BGT|BLE)\s+[A-Za-z_.$·]?[\w.$·<>]*$/;
+const COMPARE_BRANCH_LINE =
+  /^\s*(?:CBZW|CBNZW|CBZ|CBNZ)\s+[^,]+,\s*[A-Za-z_.$·]?[\w.$·<>]*$/;
+const TEST_BRANCH_LINE =
+  /^\s*(?:TBZ|TBNZ)\s+[^,]+,\s*[^,]+,\s*[A-Za-z_.$·]?[\w.$·<>]*$/;
 
-const BRANCH_LINE = /^\s*(B|BL|BR|BLR|BEQ|BNE|BCS|BCC|BMI|BPL|BVS|BVC|BHI|BLS|BGE|BLT|BGT|BLE|CBZ|CBNZ|TBZ|TBNZ)\s+[A-Za-z_]*$/;
+function isBranchLine(text) {
+  return (
+    SIMPLE_BRANCH_LINE.test(text) ||
+    COMPARE_BRANCH_LINE.test(text) ||
+    TEST_BRANCH_LINE.test(text)
+  );
+}
 
 const SNIPPETS = [
   {
@@ -142,7 +109,7 @@ const ARM64_REGISTERS = (() => {
   for (let i = 0; i <= 31; i++) {
     registers.push(`V${i}`, `F${i}`);
   }
-  registers.push('ZR', 'FP', 'SP', 'SB', 'PC', 'LR', 'TLS');
+  registers.push('ZR', 'FP', 'SP', 'RSP', 'SB', 'PC', 'LR', 'TLS');
   return [...new Set(registers)];
 })();
 
@@ -201,7 +168,7 @@ function registerDoc(register, arch) {
       return 'ARM64 general-purpose register.';
     }
     if (/^V\d+$/.test(register)) {
-      return 'ARM64 SIMD/FP vector register. Add a lane suffix such as `.S` or `.D` when needed.';
+      return 'ARM64 SIMD/FP vector register. Add an arrangement suffix such as `.S4` or `.D2` when needed.';
     }
     if (/^F\d+$/.test(register)) {
       return 'ARM64 floating-point register (alias of the corresponding V register).';
@@ -472,17 +439,15 @@ class AsmHoverProvider {
     if (FLAGS[word]) {
       return new vscode.Hover(new vscode.MarkdownString(FLAGS[word]), range);
     }
-    if (INSTRUCTION_DOCS[word]) {
-      return new vscode.Hover(
-        new vscode.MarkdownString(INSTRUCTION_DOCS[word]),
-        range
-      );
-    }
 
     const arch = tooling.architectureFor(
       document.uri.fsPath,
       document.getText()
     );
+    const doc = instructionDoc(word, arch);
+    if (doc) {
+      return new vscode.Hover(new vscode.MarkdownString(doc), range);
+    }
     if (isRegister(word, arch)) {
       return new vscode.Hover(
         new vscode.MarkdownString(registerDoc(word, arch)),
@@ -553,7 +518,7 @@ class AsmCompletionProvider {
     const labels = collectLabels(text);
     const items = [];
 
-    if (/^[RVFXYZ]\d*$/i.test(word)) {
+    if (/^(?:[RVFXYZ]\d*|RSP)$/i.test(word)) {
       for (const register of registersFor(arch)) {
         const item = new vscode.CompletionItem(
           register,
@@ -580,7 +545,7 @@ class AsmCompletionProvider {
       return items;
     }
 
-    if (BRANCH_LINE.test(before)) {
+    if (isBranchLine(before)) {
       for (const label of labels) {
         const item = new vscode.CompletionItem(
           label,
@@ -653,8 +618,9 @@ class AsmCompletionProvider {
           : arch === 'arm64'
             ? 'ARM64 instruction'
             : 'Go assembly instruction';
-      if (INSTRUCTION_DOCS[name]) {
-        item.documentation = new vscode.MarkdownString(INSTRUCTION_DOCS[name]);
+      const doc = instructionDoc(name, arch);
+      if (doc) {
+        item.documentation = new vscode.MarkdownString(doc);
       }
       item.range = range;
       item.sortText = `5${name}`;

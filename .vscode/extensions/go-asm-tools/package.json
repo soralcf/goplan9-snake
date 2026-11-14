@@ -2,7 +2,10 @@
   "name": "go-asm-tools",
   "displayName": "Go Assembly Tools",
   "description": "Workspace-local Go Plan 9 assembly tooling: highlighting, completion, format-on-save, navigation, outline, and an offline handbook.",
-  "version": "0.6.6",
+  "version": "0.6.7",
+  "scripts": {
+    "check": "node scripts/check-mnemonics.js"
+  },
   "publisher": "local",
   "engines": {
     "vscode": "^1.89.0"

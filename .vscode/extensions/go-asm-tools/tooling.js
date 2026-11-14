@@ -4,6 +4,7 @@ const cp = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { fallbackInstructions } = require('./instruction-data');
 
 function firstExisting(candidates, fallback) {
   for (const candidate of candidates) {
@@ -352,30 +353,6 @@ function parseInclude(lineText) {
   return match ? match[1] : undefined;
 }
 
-const fallbackInstructions = {
-  arm64: [
-    'MOVD', 'MOVW', 'MOVH', 'MOVB', 'MOVBU', 'MOVHU', 'MOVWU',
-    'ADD', 'ADDS', 'SUB', 'SUBS', 'MUL', 'MADD', 'MSUB', 'SDIV', 'UDIV',
-    'AND', 'ANDS', 'ORR', 'EOR', 'BIC', 'MVN', 'LSL', 'LSR', 'ASR', 'ROR',
-    'CMP', 'CMN', 'TST', 'B', 'BL', 'BEQ', 'BNE', 'BCS',
-    'BCC', 'BMI', 'BPL', 'BVS', 'BVC', 'BHI', 'BLS', 'BGE', 'BLT', 'BGT',
-    'BLE', 'CBZ', 'CBNZ', 'TBZ', 'TBNZ', 'RET', 'NOP', 'LDP', 'STP',
-    'LDR', 'STR', 'LDRB', 'STRB', 'LDRH', 'STRH', 'LDAR', 'STLR',
-    'FMOVS', 'FMOVD', 'FADD', 'FSUB', 'FMUL', 'FDIV', 'FABS', 'FNEG',
-    'FSQRT', 'FCMP', 'CSEL', 'CSINC', 'CSINV', 'CSNEG', 'CSET', 'CSETM',
-    'SXTB', 'SXTH', 'SXTW', 'UXTB', 'UXTH', 'UXTW', 'CLZ', 'RBIT',
-    'REV', 'REV16', 'REV32',
-  ],
-  amd64: [
-    'MOVQ', 'MOVL', 'MOVW', 'MOVB', 'ADDQ', 'ADDL', 'SUBQ', 'SUBL',
-    'IMULQ', 'IDIVQ', 'ANDQ', 'ORQ', 'XORQ', 'CMPQ', 'CMPL', 'TESTQ',
-    'TESTL', 'LEAQ', 'JMP', 'JZ', 'JNZ', 'JEQ', 'JNE', 'CALL', 'RET',
-    'PUSHQ', 'POPQ', 'SHLQ', 'SHRQ', 'SARQ', 'MOVSS', 'MOVSD', 'ADDSS',
-    'ADDSD', 'SUBSS', 'SUBSD', 'MULSS', 'MULSD', 'DIVSS', 'DIVSD',
-    'CMPSS', 'CMPSD', 'CVTSI2SS', 'CVTSI2SD', 'CVTSS2SD', 'CVTSD2SS',
-  ],
-};
-
 const KNOWN_ARCHES = [
   'arm64', 'arm', 'amd64', '386', 'ppc64le', 'ppc64', 's390x',
   'riscv64', 'loong64', 'mips64le', 'mips64', 'mipsle', 'mips', 'wasm',
@@ -398,7 +375,10 @@ const ARCH_DIRS = {
   wasm: 'wasm',
 };
 
-const GENERIC_INSTRUCTIONS = ['RET', 'NOP', 'WORD', 'DWORD', 'QUAD'];
+const GENERIC_INSTRUCTIONS = ['RET', 'NOP'];
+// Raw data pseudo-instructions are only offered when no arch-specific list is
+// available; anames.go decides which of them are valid for a real architecture.
+const GENERIC_DATA_INSTRUCTIONS = ['WORD', 'DWORD', 'QUAD'];
 
 // Mnemonics the assembler accepts that are not arch-specific: B and BL are
 // aliases of the shared JMP and CALL opcodes.
@@ -457,7 +437,12 @@ function fallbackFor(key) {
   if (key === '386') {
     return fallbackInstructions.amd64;
   }
-  return fallbackInstructions[key] || GENERIC_INSTRUCTIONS;
+  return (
+    fallbackInstructions[key] || [
+      ...GENERIC_INSTRUCTIONS,
+      ...GENERIC_DATA_INSTRUCTIONS,
+    ]
+  );
 }
 
 // The per-architecture anames.go starts at A_ARCHSPECIFIC, so opcodes shared
@@ -485,7 +470,7 @@ async function getInstructionNames(arch, gorootOverride) {
   const key = arch || 'generic';
   const dir = ARCH_DIRS[key];
   if (!dir) {
-    return GENERIC_INSTRUCTIONS;
+    return [...GENERIC_INSTRUCTIONS, ...GENERIC_DATA_INSTRUCTIONS];
   }
 
   const roots = [];
@@ -538,6 +523,7 @@ async function getInstructionNames(arch, gorootOverride) {
 }
 
 module.exports = {
+  ARCH_ALIASES,
   architectureFor,
   asmMaskMarker,
   findHeader,

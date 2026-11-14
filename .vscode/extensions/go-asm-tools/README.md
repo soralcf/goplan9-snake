@@ -17,10 +17,10 @@
 
 ## 功能
 
-- **语法高亮**：指令、ARM64 寄存器（`R0-R30`、`F0-F31`、`V0-V31`、`ZR/FP/SP/SB/PC/LR/TLS`）、伪指令、标志、符号、label、偏移、`#include`、注释、数字、字符串。
+- **语法高亮**：指令、ARM64 寄存器（`R0-R30`、`F0-F31`、`V0-V31`（含 `.S4`/`.D2` 排列后缀）、`ZR/FP/SP/RSP/SB/PC/LR/TLS`）、伪指令、标志、符号、label、偏移、`#include`、注释、数字、字符串。
 - **补全提示**：
   - 指令：从本机 Go 的 `$GOROOT/src/cmd/internal/obj/arm64/anames.go`（或 `x86/anames.go`）动态读取，按文件名/`//go:build` 自动选择架构。
-  - 寄存器：ARM64 `R0-R30`、`F0-F31`、`V0-V31`、`ZR/FP/SP/SB/PC/LR/TLS`；amd64 常用寄存器。
+  - 寄存器：ARM64 `R0-R30`、`F0-F31`、`V0-V31`、`ZR/FP/SP/RSP/SB/PC/LR/TLS`；amd64 常用寄存器。
   - `TEXT`/`GLOBL` flags：`NOSPLIT`、`NOFRAME`、`RODATA`、`NOPTR`、`DUPOK` 等，带说明。
   - 当前文件中的 label（在 `B`/`BL`/`BEQ` 等分支后优先提示）。
   - Snippet：`TEXT`/`DATA`/`GLOBL`/`#include`/`MOVD`/`ADD`，参考 `quillaja.goasm` 的补全片段并补上了 Go 语法中的 `$`。
@@ -50,5 +50,6 @@
 - `.go` 格式化使用 `gofmt`；默认从 `go` 同目录或 Homebrew 路径查找，也可以用 `GOFMT` 环境变量指定。
 - 查找 GOROOT 时优先使用 Go 扩展的 `go.goroot` 设置，其次使用 `GOROOT` 环境变量，最后执行 `go env GOROOT`。
 - 手册源文件是扩展内的 `handbook/ASM-HANDBOOK.md`；修改后重新执行 `Go Assembly: Open Handbook` 即可刷新（面板已打开时会重新渲染）。手册里的项目链接（如 `docs/ROADMAP.md`）按工作区根目录解析。
+- 指令 hover 文档和 fallback 补全列表在 `instruction-data.js`，手册第 8 章在 `handbook/ASM-HANDBOOK.md`。修改后运行 `node scripts/check-mnemonics.js`（或在本目录 `npm run check`）校验助记符是否都在本机 Go 的 `anames.go` 中，并检查项目 `.s` 用到的助记符是否都有 hover 说明。
 - 修改扩展代码或 grammar 后需要 `Developer: Reload Window`。
 - 主题对 scope 的配色不同；如果某个 token 没有颜色，可以用 `Developer: Inspect Editor Tokens and Scopes` 查看它的 scope。
