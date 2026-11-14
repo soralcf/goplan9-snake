@@ -1,5 +1,7 @@
 ## M1
 
+> 补码、整数溢出与 `AbsDiff` 两种契约的专题笔记：[M1-TWOS-COMPLEMENT-NOTES.md](M1-TWOS-COMPLEMENT-NOTES.md)
+
 ### internal
 
 将代码文件与函数移动至 internal 方便管理, 模块名不能包含 - , 才能跨包导入汇编代码
