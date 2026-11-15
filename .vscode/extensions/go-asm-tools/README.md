@@ -50,6 +50,6 @@
 - `.go` 格式化使用 `gofmt`；默认从 `go` 同目录或 Homebrew 路径查找，也可以用 `GOFMT` 环境变量指定。
 - 查找 GOROOT 时优先使用 Go 扩展的 `go.goroot` 设置，其次使用 `GOROOT` 环境变量，最后执行 `go env GOROOT`。
 - 手册源文件是扩展内的 `handbook/ASM-HANDBOOK.md`；修改后重新执行 `Go Assembly: Open Handbook` 即可刷新（面板已打开时会重新渲染）。手册里的项目链接（如 `docs/ROADMAP.md`）按工作区根目录解析。
-- 指令 hover 文档和 fallback 补全列表在 `instruction-data.js`，手册第 8 章在 `handbook/ASM-HANDBOOK.md`。修改后运行 `node scripts/check-mnemonics.js`（或在本目录 `npm run check`）校验助记符是否都在本机 Go 的 `anames.go` 中，并检查项目 `.s` 用到的助记符是否都有 hover 说明。
+- 指令 hover 文档和 fallback 补全列表在 `instruction-data.js`，逐条操作数语法在 `instruction-syntax.js`（仅 hover 使用，补全保持一句话说明），手册第 8 章在 `handbook/ASM-HANDBOOK.md`。修改后运行 `npm run check`：`check-mnemonics.js` 校验助记符是否都在本机 Go 的 `anames.go` 中、项目 `.s` 用到的助记符是否都有 hover 说明；`check-syntax.js` 会把每条语法示例真正交给 `go tool asm` 汇编，并断言常见错误写法必须失败。
 - 修改扩展代码或 grammar 后需要 `Developer: Reload Window`。
 - 主题对 scope 的配色不同；如果某个 token 没有颜色，可以用 `Developer: Inspect Editor Tokens and Scopes` 查看它的 scope。

@@ -82,7 +82,7 @@
 | 栈对齐 | 16 字节 | 8 字节 | 帧大小按 8 字节倍数书写，本项目约定 16 |
 | 参数传递 ABI0 | 调用者栈帧 | 调用者栈帧 | 手写汇编保持一致 |
 | 操作数顺序 | 多数指令“源, …, 目标”，相对 GNU 反向 | 通常“源, 目标” | 不可直接照搬 |
-| 宽度表示 | 助记符内：`MOVD`、`MOVW`、`MOVB` | 后缀式：`MOVQ`、`MOVL`、`MOVW`、`MOVB` | `D`=Doubleword，`Q`=Quadword |
+| 宽度表示 | 助记符内：`MOVD`、`MOVW`、`MOVB` | 后缀式：`MOVQ`、`MOVL`、`MOVW`、`MOVB` | `D`=Doubleword，`Q`=Quadword；arm64 没有 D 宽度后缀，未加 `W` 的整数运算默认 64 位 |
 | 条件分支 | `BEQ`、`BNE`、`BLT`、`BGT` | `JEQ`、`JNE`、`JLT`、`JGT` | 条件码含义相同，助记符不同 |
 | 系统调用 | `R16` 调用号，`SVC $0x80` | `AX` 调用号 + `0x2000000`，`SYSCALL` | Darwin 约定不同 |
 | 本项目 | 主目标 | 不实现 | 仅作差异对照 |
@@ -478,6 +478,8 @@ BHI  greater_8       // 无符号 R3 > 8 时跳转
 
 `NEG` 是 64 位取负，`NEGW` 是 32 位取负，`NEGSW` 是 32 位取负并设置标志。不是所有指令都有这些变体：例如 `TBZ`/`TBNZ` 没有 W 形式；`MOVZ`/`MOVK`/`MOVN` 有 `MOVZW`/`MOVKW`/`MOVNW`，但源码里通常写 `MOVW`/`MOVD` 让汇编器选择。以本机 `anames.go` 和补全列表为准。
 
+arm64 的整数运算只有 64 位和 32 位两档：**不带后缀的基名就是 64 位**，加 `W` 才是 32 位；不存在 `CMPD` 这类 D 宽度后缀（`ADD`/`SUB` 也没有 `ADDD`/`SUBD`），写出来会报 `unrecognized instruction`。`D` 只在别处表示宽度：`MOVD` 的 D 是 doubleword（64 位），`FADDD`/`FCMPD` 的 D 是 double 浮点精度——都不是“整数 64 位运算”的后缀。
+
 ### 7.4 加载与存储
 
 ```asm
@@ -555,11 +557,11 @@ CMP  R1, R0           // 比较 R0 与 R1
 | `MOVHU` | Move Halfword Unsigned | 16 位无符号加载 |
 | `MOVB` | Move Byte | 8 位有符号加载/存储 |
 | `MOVBU` | Move Byte Unsigned | 8 位无符号加载 |
-| `LDP` | Load Pair | 一次加载两个寄存器 |
-| `STP` | Store Pair | 一次存储两个寄存器 |
-| `MOVZ` | Move Zero | 把 16 位立即数写入寄存器并清零其余位 |
-| `MOVK` | Move Keep | 把 16 位立即数写入指定半字，保留其他位 |
-| `MOVN` | Move Not | 写入立即数的按位取反结果 |
+| `LDP` | Load Pair | 一次加载两个 64 位寄存器（`LDPW` 为两个 32 位字） |
+| `STP` | Store Pair | 一次存储两个 64 位寄存器（`STPW` 为两个 32 位字） |
+| `MOVZ` | Move Zero | 把 16 位立即数写入 64 位寄存器并清零其余位（`MOVZW` 为 32 位形式） |
+| `MOVK` | Move Keep | 把 16 位立即数写入 64 位寄存器的指定半字，保留其他位（`MOVKW` 为 32 位形式） |
+| `MOVN` | Move Not | 把立即数取反后写入 64 位寄存器（`MOVNW` 为 32 位形式） |
 
 大立即数通常由 `MOVZ`/`MOVK` 组合，或由汇编器把 `MOVD $imm, Rn` 展开成多条指令。关心实际指令数时用 `objdump` 确认。
 
@@ -586,27 +588,27 @@ CMP  R1, R0           // 比较 R0 与 R1
 | `ROR` / `RORW` | Rotate Right | 循环右移 |
 | `TST` / `TSTW` | Test | 按位测试，等价于丢弃结果的 `ANDS` |
 
-`W` 后缀表示 32 位形式；`S` 后缀表示设置条件标志；两者可以组合，例如 `NEGSW`。写 32 位运算时优先用 W 形式，避免把 64 位结果误当成 32 位。
+`W` 后缀表示 32 位形式；`S` 后缀表示设置条件标志；两者可以组合，例如 `NEGSW`。不带 `W` 的基名（`ADD`、`SUBS`、`CMP` 等）都是 64 位形式，arm64 没有 D 宽度后缀。写 32 位运算时优先用 W 形式，避免把 64 位结果误当成 32 位。
 
 ### 8.3 比较与分支
 
 | 指令 | 英文展开 | 说明 |
 |---|---|---|
-| `CMP` / `CMPW` | Compare | 计算 `b - a` 并设置标志；`CMPW` 只比较低 32 位 |
-| `CMN` / `CMNW` | Compare Negative | 计算 `b + a` 并设置标志 |
-| `CCMP` / `CCMPW` | Conditional Compare | 条件比较，用于链式条件 |
-| `CCMN` / `CCMNW` | Conditional Compare Negative | 条件比较（加法形式） |
+| `CMP` / `CMPW` | Compare | 比较 64 位值并设置标志（`b - a`）；`CMPW` 只比较低 32 位；不存在 `CMPD` |
+| `CMN` / `CMNW` | Compare Negative | 比较 64 位值并设置标志（`b + a`）；`CMNW` 只比较低 32 位 |
+| `CCMP` / `CCMPW` | Conditional Compare | 64 位条件比较，用于链式条件；`CCMPW` 只比较低 32 位 |
+| `CCMN` / `CCMNW` | Conditional Compare Negative | 64 位条件比较（加法形式）；`CCMNW` 只处理低 32 位 |
 | `CBZ` / `CBZW` | Compare and Branch on Zero | `R0 == 0` 时跳转；`CBZW` 只测试低 32 位 |
 | `CBNZ` / `CBNZW` | Compare and Branch on Non-Zero | `R0 != 0` 时跳转；`CBNZW` 只测试低 32 位 |
-| `TBZ` | Test Bit and Branch if Zero | 指定位为 0 时跳转 |
-| `TBNZ` | Test Bit and Branch if Non-Zero | 指定位为 1 时跳转 |
+| `TBZ` | Test Bit and Branch if Zero | 64 位寄存器中指定位为 0 时跳转 |
+| `TBNZ` | Test Bit and Branch if Non-Zero | 64 位寄存器中指定位为 1 时跳转 |
 | `B` | Branch | 无条件跳转 |
 | `BL` | Branch with Link | 带链接跳转（函数调用） |
 | `JMP` | Jump | 跳转到寄存器地址 |
 | `CALL` | Call | 调用寄存器地址 |
 | `RET` | Return | 返回 |
 
-`TBZ`/`TBNZ` 没有 W 形式；`CMPW`/`CBZW` 等 W 形式只处理低 32 位。
+`TBZ`/`TBNZ` 没有 W 形式；`CMPW`/`CBZW` 等 W 形式只处理低 32 位。`CMP`/`CMN`/`CCMP`/`CCMN` 的基名默认就是 64 位，不存在 `CMPD`/`CMND`。
 
 `B 2(PC)` 表示从当前分支指令向后数 2 条指令的位置；源码中常用于跳过下一条指令。Go 文档中寄存器 `br` 的规范写法是 `JMP`，寄存器 `blr` 的规范写法是 `CALL`。
 
@@ -626,7 +628,7 @@ CSEL GT, R0, R19, R1   // 若 GT 则 R1 = R0，否则 R1 = R19
 CSET EQ, R2            // 若 EQ 则 R2 = 1，否则 0
 ```
 
-条件选择不产生分支，适合替代短小的 `if/else`。带 `W` 的 `CSELW`/`CSETW` 等只写 32 位结果。
+条件选择不产生分支，适合替代短小的 `if/else`。不带 `W` 的基名是 64 位形式；带 `W` 的 `CSELW`/`CSETW` 等只写 32 位结果。
 
 ## 9. 条件码与分支
 
@@ -967,7 +969,7 @@ Delve 常用命令：
 
 ### 16.3 arm64 指令
 
-`W` 后缀表示 32 位形式（如 `NEGW`、`CMPW`、`CSELW`），`S` 后缀表示设置条件标志（如 `NEGS`），两者可以组合为 `NEGSW`。下表列出常用基名和主要变体；完整列表见第 8 章。
+`W` 后缀表示 32 位形式（如 `NEGW`、`CMPW`、`CSELW`），`S` 后缀表示设置条件标志（如 `NEGS`），两者可以组合为 `NEGSW`。不带 `W` 的基名是 64 位形式；arm64 没有 D 宽度后缀（`CMP` 已是 64 位，不存在 `CMPD`）。下表列出常用基名和主要变体；完整列表见第 8 章。
 
 | 缩写 | 英文全称 | 说明 |
 |---|---|---|
@@ -1006,11 +1008,11 @@ Delve 常用命令：
 | CBZW | Compare and Branch on Zero, 32-bit | 32 位为零则分支 |
 | CBNZ | Compare and Branch on Non-Zero | 非零则分支 |
 | CBNZW | Compare and Branch on Non-Zero, 32-bit | 32 位非零则分支 |
-| CCMN | Conditional Compare Negative | 条件比较（加法） |
-| CCMP | Conditional Compare | 条件比较 |
-| CMP | Compare | 比较 |
+| CCMN | Conditional Compare Negative | 64 位条件比较（加法） |
+| CCMP | Conditional Compare | 64 位条件比较 |
+| CMP | Compare | 比较（64 位；没有 `CMPD`） |
 | CMPW | Compare, 32-bit | 32 位比较 |
-| CMN | Compare Negative | 比较负数（加法形式） |
+| CMN | Compare Negative | 比较负数（64 位，加法形式） |
 | CMNW | Compare Negative, 32-bit | 32 位比较负数 |
 | CSEL | Conditional Select | 条件选择 |
 | CSELW | Conditional Select, 32-bit | 32 位条件选择 |

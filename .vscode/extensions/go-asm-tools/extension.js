@@ -5,6 +5,7 @@ const path = require('path');
 const vscode = require('vscode');
 const tooling = require('./tooling');
 const { instructionDoc } = require('./instruction-data');
+const { instructionSyntax } = require('./instruction-syntax');
 const { renderMarkdown } = require('./markdown');
 
 const selector = { language: 'go.asm', scheme: 'file' };
@@ -446,7 +447,9 @@ class AsmHoverProvider {
     );
     const doc = instructionDoc(word, arch);
     if (doc) {
-      return new vscode.Hover(new vscode.MarkdownString(doc), range);
+      const syntax = instructionSyntax(word, arch);
+      const markdown = syntax ? `${doc}\n\n${syntax}` : doc;
+      return new vscode.Hover(new vscode.MarkdownString(markdown), range);
     }
     if (isRegister(word, arch)) {
       return new vscode.Hover(
