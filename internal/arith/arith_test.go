@@ -121,4 +121,52 @@ func TestAbsDiff(t *testing.T) {
 	}
 }
 
-// TODO: TestSumTo.
+// TestSumTo 钉住契约：n <= 0 返回 0，正 n 按 int64 回绕。
+// MinInt64 用例同时保证实现没有把负 n 当成 countdown 起点（否则约 2^64 轮）。
+//
+// 两条溢出边界用例各需约 2^32 次累加（实测合计约 2 秒），上界固定；
+// n = MaxInt64 的回绕在循环实现下跑不完，等切换成闭式公式后再补。
+func TestSumTo(t *testing.T) {
+	tests := []struct {
+		name string
+		n    int64
+		want int64
+	}{
+		// 常规：正 n 逐轮累加。
+		{"positive", 1, 1},
+		{"positive multiple terms", 10, 55},
+		{"positive large", 100000, 5000050000},
+
+		// 符号：0 与负 n 都必须直接返回 0。
+		{"zero", 0, 0},
+		{"negative", -1, 0},
+		{"negative large", -1000, 0},
+
+		// 精确边界：MinInt64 是负向端点；2^32-1 是和仍能装进 int64 的最大 n。
+		{"min int64", math.MinInt64, 0},
+		{"largest n whose sum fits", 1<<32 - 1, math.MaxInt64 - math.MaxInt32},
+
+		// 契约角落：再多一项就越界，按 int64 回绕成负数。
+		{"next n wraps to negative", 1 << 32, math.MinInt64 + 1<<31},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := SumTo(tt.n); got != tt.want {
+				t.Errorf("SumTo(%d) = %d, want %d", tt.n, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSumToReference 在 [1, 10000] 上逐点与 Go 循环参考实现对拍，
+// 覆盖表驱动用例抽不到的中段取值，抓循环差一或提前退出。
+func TestSumToReference(t *testing.T) {
+	var want int64
+	for n := int64(1); n <= 10000; n++ {
+		want += n
+		if got := SumTo(n); got != want {
+			t.Fatalf("SumTo(%d) = %d, want %d", n, got, want)
+		}
+	}
+}
