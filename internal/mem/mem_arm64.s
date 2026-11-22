@@ -19,6 +19,13 @@ _done:
 	RET
 
 // [优化建议]
+// - 第 9 行 `MOVB v+12(FP), R2` 换成 MOVBU 语义更准确：参数 v 是 byte
+//   （无符号），而 MOVB 是符号扩展（LDRSB 语义），v = 0xA0 时 R2 实际是
+//   0xffffffffffffffa0。当前 `MOVB R2, (R0)` 只写低 8 位，所以输出正确，
+//   但正确性依赖“高位脏了也没关系”这个隐含前提。MOVBU 做零扩展（LDRB
+//   语义），R2 就是干净的 0x00..0xFF，读代码和用调试器时不用反推截断；
+//   它也是下面 8 字节复制的前提。收益：语义准确，指令数与性能都不变；
+//   风险：无，store 仍只取低字节；验证：TestFillByte 里 v=0xFF 的用例。
 // - 当前写法每字节 5 条指令：MOVB 存储、ADD 指针、SUBW 计数、CMPW、BGT。
 //   两条小改动能把循环压到 3 条，契约不变：
 //   ARM64 支持后索引 store，`MOVB.P R2, 1(R0)` 存完把 R0 += 1；
@@ -34,7 +41,7 @@ _done:
 //   保存寄存器，返回后调用方不依赖；验证：现有 FillByte 全部测试。
 // - 真正有量级收益的是加宽存储：把 v 复制成 64 位字，每 8 字节一存。
 //   注意复制必须用 MOVBU，不能用 MOVB：Go 汇编的 MOVB 是符号扩展
-//   （LDURSB），MOVB 读 0xA0 得到 0xffffffffffffffa0，再移位 OR 会填出
+//   （LDRSB 语义），MOVB 读 0xA0 得到 0xffffffffffffffa0，再移位 OR 会填出
 //   a0 ff ff ...；我最初写成 MOVB，TestFillByte 立刻失败。
 //	MOVBU v+12(FP), R2
 //	ORR   R2<<8, R2
