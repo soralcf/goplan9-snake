@@ -8,27 +8,28 @@
 
 ## 当前进度
 
-- M0、M1 已完成并验收（M1 收尾于 2026-11-23）。
-- 下一步：M2 — Darwin 系统调用与终端生命周期。
-- 函数契约、测试设计和关键指令记录在 [docs/M1-NOTES.md](docs/M1-NOTES.md)。
+- 唯一进度源：[docs/2.1-CHECKLIST.md](docs/2.1-CHECKLIST.md)。下一件要做的事以清单里第一个“依赖已完成的待办条目”为准。
+- M0、M1 已完成并验收；记录见 [4.1 工程骨架笔记](docs/4.1-ENGINEERING-NOTES.md) 和 [4.2 基本功笔记](docs/4.2-FUNDAMENTALS-NOTES.md)。
+- 当前里程碑：M2 — Darwin 系统调用与终端生命周期。
+- 已冻结的函数签名和全局约定见 [docs/2.2-CONTRACTS.md](docs/2.2-CONTRACTS.md)。
 
 ---
 
 ## 最终验收（Definition of Done）
 
-在真实终端中运行 `./snake`：
+在真实终端中运行 `./snake`。完成状态以 [2.1-CHECKLIST 的 M8 关卡](docs/2.1-CHECKLIST.md#m8) 为准；这里只列验收口径。
 
-- [ ] 自动进入备用屏幕、隐藏光标，棋盘尺寸与当前终端匹配（有安全上限）。
-- [ ] 蛇从长度 1 开始，自动移动、吃食物、变长；全程无键盘输入。
-- [ ] Hamiltonian 环保证安全；BFS 安全窗口内的捷径加速；无撞墙、无自撞。
-- [ ] 最终 `length == W*H`，最后一帧显示整个棋盘被蛇填满。
-- [ ] 显示胜利信息，恢复光标和主屏幕，退出码 0。
-- [ ] 非 tty / 终端过小时有明确回退或报错，不崩溃。
-- [ ] `go test ./... -count=1` 全部通过；`go vet ./...` 无输出；`go build` 成功。
-- [ ] 无头模式（不渲染、不睡眠）在固定种子下确定性通关，并有 tick 预算断言。
-- [ ] 产品代码边界：Go 只包含入口、函数声明、常量和测试；游戏状态、移动、寻路、渲染、系统调用全部在 `*_arm64.s`。
+- 自动进入备用屏幕、隐藏光标，棋盘尺寸与当前终端匹配（有安全上限）。
+- 蛇从长度 1 开始，自动移动、吃食物、变长；全程无键盘输入。
+- Hamiltonian 环保证安全；BFS 安全窗口内的捷径加速；无撞墙、无自撞。
+- 最终 `length == W*H`，最后一帧显示整个棋盘被蛇填满。
+- 显示胜利信息，恢复光标和主屏幕，退出码 0。
+- 非 tty / 终端过小时有明确回退或报错，不崩溃。
+- `go test ./... -count=1` 全部通过；`go vet ./...` 无输出；`go build` 成功。
+- 无头模式（不渲染、不睡眠）在固定种子下确定性通关，并有 tick 预算断言。
+- 产品代码边界：Go 只包含入口、函数声明、常量和测试；游戏状态、移动、寻路、渲染、系统调用全部在 `*_arm64.s`。
 
-最终演示时，把下面这条命令和输出保存到 `docs/DEMO.md`（你自己记录）：
+最终演示时，把下面这条命令和输出保存到 `docs/5.2-DEMO.md`（你自己记录）：
 
 ```bash
 go build -o snake . && ./snake
@@ -65,7 +66,7 @@ go build -o snake . && ./snake
 - 包级汇编 BSS 可以不声明在 Go 里：`GLOBL ·buf(SB), NOPTR, $const_MaxCells*4` 可直接链接；跨 `.s` 文件用 `·buf(SB)` 访问。
 - Go 调用手写汇编函数时，编译器生成 ABIInternal → ABI0 包装；`go tool objdump` 会显示 `goplan9snake/internal/arith.Add.abi0` 这类符号，而汇编函数本身是 ABI0。
 
-更详细的技术说明见 [docs/DESIGN.md](docs/DESIGN.md)。
+更详细的技术说明见 [docs/3.1-DESIGN.md](docs/3.1-DESIGN.md)。
 
 ---
 
@@ -75,7 +76,7 @@ go build -o snake . && ./snake
 
 | 文件 | 职责 | 语言 |
 |---|---|---|
-| `main.go` | 入口；当前调用 `arith.Add(1, 1)` 验证链路 | Go |
+| `main.go` | 入口；M2-07 前调用 `arith.Add(1, 1)` 验证链路，之后改为 `term.Run()` | Go |
 | `internal/arith/arith.go` | `Add`、`Clamp`、`AbsDiff`、`SumTo` 的无函数体声明 | Go（无逻辑） |
 | `internal/arith/arith_arm64.s` | 上述函数的汇编实现 | Plan 9 asm |
 | `internal/grid/grid_arm64.s` | `CellIndex` | Plan 9 asm |
@@ -90,19 +91,21 @@ M2 起继续按 `internal/<pkg>/` 分包：系统调用、游戏状态/移动、
 
 ## 进度
 
+状态摘要用于快速浏览，**以 [docs/2.1-CHECKLIST.md](docs/2.1-CHECKLIST.md) 为准**；本表只在里程碑关卡通过时更新。
+
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
-| M0 | 工程骨架与 ABI0 热身 | 已完成（[笔记](docs/M0-NOTES.md)） |
-| M1 | 汇编基本功：数据、循环、分支、BSS | 已完成（[笔记](docs/M1-NOTES.md)） |
-| M2 | Darwin 系统调用与终端生命周期 | 下一步 |
-| M3 | 游戏状态与移动核心 | 未开始 |
-| M4 | 帧渲染与主循环 | 未开始 |
-| M5 | Hamiltonian 环，保证通关 | 未开始 |
-| M6 | BFS 寻路（独立验证） | 未开始 |
-| M7 | 安全窗口混合策略与性能 | 未开始 |
-| M8 | 打磨、最终验收与文档 | 未开始 |
+| M0 | 工程骨架与 ABI0 热身 | 已完成（[笔记](docs/4.1-ENGINEERING-NOTES.md)） |
+| M1 | 汇编基本功：数据、循环、分支、BSS | 已完成（[笔记](docs/4.2-FUNDAMENTALS-NOTES.md)） |
+| M2 | Darwin 系统调用与终端生命周期 | 进行中（[清单](docs/2.1-CHECKLIST.md#m2)） |
+| M3 | 游戏状态与移动核心 | 未开始（[清单](docs/2.1-CHECKLIST.md#m3)） |
+| M4 | 帧渲染与主循环 | 未开始（[清单](docs/2.1-CHECKLIST.md#m4)） |
+| M5 | Hamiltonian 环，保证通关 | 未开始（[清单](docs/2.1-CHECKLIST.md#m5)） |
+| M6 | BFS 寻路（独立验证） | 未开始（[清单](docs/2.1-CHECKLIST.md#m6)） |
+| M7 | 安全窗口混合策略与性能 | 未开始（[清单](docs/2.1-CHECKLIST.md#m7)） |
+| M8 | 打磨、最终验收与文档 | 未开始（[清单](docs/2.1-CHECKLIST.md#m8)） |
 
-完整任务、验收命令和常见坑见 [docs/ROADMAP.md](docs/ROADMAP.md)。
+条目顺序、状态和证据见 [docs/2.1-CHECKLIST.md](docs/2.1-CHECKLIST.md)；里程碑目标、学习点和常见坑见 [docs/1.2-ROADMAP.md](docs/1.2-ROADMAP.md)。
 
 ---
 
@@ -127,13 +130,22 @@ M2 起继续按 `internal/<pkg>/` 分包：系统调用、游戏状态/移动、
 
 ## 文档
 
-- [docs/ROADMAP.md](docs/ROADMAP.md) — M0–M8 里程碑、任务、验收命令和常见坑。
-- [docs/DESIGN.md](docs/DESIGN.md) — 架构、BSS 布局、ABI0、系统调用、Hamiltonian + 安全窗口 BFS、渲染与性能。
-- [docs/M0-NOTES.md](docs/M0-NOTES.md) — 工程骨架、ABI0、`go vet` 与 objdump 验收记录。
-- [docs/M1-NOTES.md](docs/M1-NOTES.md) — M1 函数契约、测试、符号扩展、BSS 与验收记录。
-- [docs/M1-TWOS-COMPLEMENT-NOTES.md](docs/M1-TWOS-COMPLEMENT-NOTES.md) — 补码、溢出与 `AbsDiff` 契约专题。
-- [docs/IMPLEMENTATION-OVERVIEW.md](docs/IMPLEMENTATION-OVERVIEW.md) — 用通俗语言说明各模块和函数职责。
-- [docs/REFERENCES.md](docs/REFERENCES.md) — 官方文档、中文教材、Go 源码示例、ARM64 手册、调试工具和阅读顺序。
+按从上到下的阅读顺序：
+
+1. [docs/1.1-OVERVIEW.md](docs/1.1-OVERVIEW.md) — 用通俗语言说明各模块和函数职责。
+2. [docs/1.2-ROADMAP.md](docs/1.2-ROADMAP.md) — M0–M8 里程碑目标、学习点、验收口径和常见坑。
+3. [docs/2.1-CHECKLIST.md](docs/2.1-CHECKLIST.md) — 唯一进度源：条目顺序、状态、证据和关卡。
+4. [docs/2.2-CONTRACTS.md](docs/2.2-CONTRACTS.md) — 已冻结的签名、编码、BSS 布局，以及 M2 草案和开放决策。
+5. [docs/3.1-DESIGN.md](docs/3.1-DESIGN.md) — 架构、BSS 布局、ABI0、系统调用、Hamiltonian + 安全窗口 BFS、渲染与性能。
+6. [docs/3.2-REFERENCES.md](docs/3.2-REFERENCES.md) — 官方文档、中文教材、Go 源码示例、ARM64 手册、调试工具和按条目的阅读地图。
+7. [docs/4.1-ENGINEERING-NOTES.md](docs/4.1-ENGINEERING-NOTES.md) — M0：工程骨架、ABI0、`go vet` 与 objdump 验收记录。
+8. [docs/4.2-FUNDAMENTALS-NOTES.md](docs/4.2-FUNDAMENTALS-NOTES.md) — M1：函数契约、测试、符号扩展、BSS 与验收记录。
+9. [docs/4.3-TWOS-COMPLEMENT-NOTES.md](docs/4.3-TWOS-COMPLEMENT-NOTES.md) — 补码、溢出与 `AbsDiff` 契约专题。
+10. [docs/4.4-TERMINAL-NOTES.md](docs/4.4-TERMINAL-NOTES.md) — M2：系统调用与终端生命周期笔记。
+
+计划中的产物文档：`docs/5.1-PERF.md`（M7 性能对比）、`docs/5.2-DEMO.md`（M8 演示记录），在对应关卡通过时创建。
+
+文档一致性自检：`./scripts/check-docs.sh`。
 
 ---
 

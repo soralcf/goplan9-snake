@@ -772,7 +772,7 @@ Darwin 的很多 libc 函数通过 libSystem 调用，而不是裸 `SVC`。声�
 | `usleep` | Microsecond Sleep | 微秒级睡眠 |
 | trampoline | Trampoline | 跳转到动态导入函数的短桩 |
 
-本项目已实测 `write`/`ioctl`/`exit` 的裸 `SVC` 可用；睡眠选择 libc `usleep`，原因见 [DESIGN](docs/DESIGN.md)。
+本项目已实测 `write`/`ioctl`/`exit` 的裸 `SVC` 可用；睡眠选择 libc `usleep`，原因见 [DESIGN](docs/3.1-DESIGN.md)。
 
 ### 11.6 终端尺寸
 
@@ -911,12 +911,12 @@ Delve 常用命令：
 | 里程碑 | 先读 | 再读 |
 |---|---|---|
 | M0 工程骨架/ABI0 | 第 2、3、4 章 | 第 13.1–13.2 节的验证命令 |
-| M1 数据/循环/分支/BSS | 第 6、7、8、9 章 | [M0 笔记](docs/M0-NOTES.md) |
-| M2 系统调用/终端 | 第 11、12 章 | [DESIGN](docs/DESIGN.md) 的终端部分 |
+| M1 数据/循环/分支/BSS | 第 6、7、8、9 章 | [M1 笔记](docs/4.2-FUNDAMENTALS-NOTES.md) |
+| M2 系统调用/终端 | 第 11、12 章 | [DESIGN](docs/3.1-DESIGN.md) 的终端部分 |
 | M3 游戏状态/移动 | 第 6、7、8、9 章 | 第 13.4 节的测试约束 |
 | M4 渲染/主循环 | 第 11、12 章 | 第 8.1 节的 LDP/STP |
-| M5–M7 算法 | 第 7、8、9 章 | [DESIGN](docs/DESIGN.md)、[REFERENCES](docs/REFERENCES.md) |
-| M8 打磨/验收 | 第 13、14 章 | [ROADMAP](docs/ROADMAP.md) |
+| M5–M7 算法 | 第 7、8、9 章 | [DESIGN](docs/3.1-DESIGN.md)、[REFERENCES](docs/3.2-REFERENCES.md) |
+| M8 打磨/验收 | 第 13、14 章 | [ROADMAP](docs/1.2-ROADMAP.md) |
 
 ### 15.2 官方资料
 
@@ -930,7 +930,7 @@ Delve 常用命令：
 | Darwin 系统调用 | `$GOROOT/src/syscall/asm_darwin_arm64.s` | `SVC`、errno、返回值约定 |
 | 系统调用号 | `$GOROOT/src/syscall/zsysnum_darwin_arm64.go` | `SYS_WRITE`、`SYS_IOCTL`、`SYS_EXIT` |
 
-更多资料与阅读顺序见 [REFERENCES](docs/REFERENCES.md)。
+更多资料与阅读顺序见 [REFERENCES](docs/3.2-REFERENCES.md)。
 
 ## 16. 术语与缩写总表
 
@@ -1114,7 +1114,7 @@ Delve 常用命令：
 
 ## 17. 维护说明
 
-本页由工作区扩展 `Go Assembly: Open Handbook` 从 `.vscode/extensions/go-asm-tools/handbook/ASM-HANDBOOK.md` 渲染。修改后重新执行该命令即可刷新；新增标题会自动进入左侧目录。手册中的项目链接（`docs/ROADMAP.md`、`docs/REFERENCES.md` 等）按工作区根目录解析。
+本页由工作区扩展 `Go Assembly: Open Handbook` 从 `.vscode/extensions/go-asm-tools/handbook/ASM-HANDBOOK.md` 渲染。修改后重新执行该命令即可刷新；新增标题会自动进入左侧目录。手册中的项目链接（`docs/1.2-ROADMAP.md`、`docs/3.2-REFERENCES.md` 等）按工作区根目录解析。
 
 架构相关内容应标注 [通用]、[arm64]、[darwin] 或 [amd64]；新增缩写时优先在对应表格中补“英文展开”列，并在第 16 章登记。
 
