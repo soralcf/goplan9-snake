@@ -69,10 +69,10 @@ M0 工程骨架/ABI0
 go test ./... -count=1     # 通过
 go vet ./...               # 无输出
 go build -o snake .        # 成功
-go tool objdump -s 'main\.Add' ./snake | head -30
+go tool objdump -s 'goplan9snake/internal/arith\.Add' ./snake | head -30
 ```
 
-- [x] objdump 输出里能看到 `main.Add.abi0` 和你写的 `ADD`/`MOVD` 指令。
+- [x] objdump 输出里能看到 `goplan9snake/internal/arith.Add.abi0` 和你写的 `ADD`/`MOVD` 指令。
 - [x] 测试覆盖了负数与边界值。
 - [x] 你能解释：为什么 `ret+16(FP)` 是返回值、`$0-24` 的 24 从哪来。
 - [x] 你能解释 ABI0 与 ABIInternal 的区别，以及为什么手写汇编默认用 ABI0。
@@ -91,7 +91,7 @@ go tool objdump -s 'main\.Add' ./snake | head -30
 1. `TEXT ·Add(SB), NOSPLIT, $0-24` 中每个部分的含义是什么？
 2. 为什么汇编函数里读参数用 `0(FP)`、`8(FP)`，而不是寄存器？
 3. `go vet` 对汇编函数检查了什么？
-4. `main.Add.abi0` 符号和 Go 里的 `Add` 是什么关系？
+4. `goplan9snake/internal/arith.Add.abi0` 符号和 Go 里的 `arith.Add` 是什么关系？
 
 ---
 

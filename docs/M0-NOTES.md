@@ -9,9 +9,11 @@
 ### 编写代码
 
 - main.go
-- add.go
-- add_test.go
-- add_arm64.s
+- internal/arith/arith.go
+- internal/arith/arith_test.go
+- internal/arith/arith_arm64.s
+
+（M1 把最初的 `add.go` / `add_test.go` / `add_arm64.s` 移到了 `internal/arith/`。）
 
 ### 常用命令
 
@@ -19,8 +21,8 @@
 go vet ./...
 go test ./... -count=1
 GOARCH=arm64 go build -o snake .
-go tool objdump -s 'main.Add' snake
-GOARCH=arm64 go build -o snake . && go tool objdump -s 'main.Add' snake 
+go tool objdump -s 'goplan9snake/internal/arith\.Add' snake
+GOARCH=arm64 go build -o snake . && go tool objdump -s 'goplan9snake/internal/arith\.Add' snake
 ```
 
 ### 自测
@@ -51,10 +53,12 @@ FP是 go 语言汇编的虚拟寄存器, 存储栈帧指针, 参数由调用方�
 - `go vet ./...`：无输出。
 - `gofmt -l .`：无输出。
 - `go build -o snake .`：成功；`./snake` 输出 `2`。
-- `go tool objdump -s 'main\.Add' ./snake`：能看到 `main.Add.abi0` 和手写的 `MOVD`/`ADD`/`RET`。
+- `go tool objdump -s 'goplan9snake/internal/arith\.Add' ./snake`：能看到 `goplan9snake/internal/arith.Add.abi0` 和手写的 `MOVD`/`ADD`/`RET`。
 - 变异测试：把 `ADD` 改成 `SUB` 后测试正确失败，证明断言有效。
 
 **自测题批改**
+
+> 下面的批改与修正答案记录的是 M0 当时 `Add` 位于 `main` 包的状态；M1 已把实现移到 `internal/arith`，当前符号是 `goplan9snake/internal/arith.Add.abi0`。
 
 1. ⚠️ 部分正确。`$0-24` 中 `0` 是本地帧大小，`24` 是**参数 + 返回值**的总大小：`a` 8 + `b` 8 + `ret` 8 = 24，不是只有参数。`·` 是包分隔符，汇编器把 `·Add` 变成符号 `main.Add`；`SB` 是静态基址伪寄存器，用来引用符号地址。注意题目里是 `Add`，大小写敏感。
 2. ⚠️ 前半正确，后半需要修正。手写汇编是 ABI0，参数和返回值都在栈上，`FP` 是虚拟帧指针伪寄存器，汇编器把 `a+0(FP)` 解析成栈偏移。Go 调用方使用的是 ABIInternal（寄存器传参），编译器会生成 ABI 包装函数在两者之间转换；汇编函数本身**不会**被转换成 ABIInternal。

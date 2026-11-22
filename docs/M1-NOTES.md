@@ -77,3 +77,64 @@ ABI 文档中对应栈序列的 `pointer-alignment`（stack-assigned arguments �
 
 可在调用点验证：`TestCellIndex.func1` 把 x 写到 `8(RSP)`、y/w 写到 `12(RSP)`，`CALL CellIndex.abi0` 后从 `24(RSP)` 读返回值——即 `ret+16(FP)`。若误写成 `ret+12(FP)`，`go vet` 会报 `invalid offset ret+12; expected ret+16(FP)`。
 
+
+### counter：BSS 计数器（2026-11-23 验收）
+
+**契约**
+
+- `Inc() int64`：先把 `·value` 加一，再返回加一后的值；`Reset` 后依次得到 1, 2, 3, …
+- `Reset()`：把 `·value` 归零，无返回值，可重复调用。
+- `·value` 是 8 字节 `NOPTR` BSS，初值 0；测试每个用例先 `Reset`，不使用 `t.Parallel()`。
+- `int64` 溢出按补码回绕；从 0 出发不可达，不做断言。
+
+**测试与变异**
+
+`internal/counter/counter_test.go`：
+
+- `TestInc`：字面量冻结 1 / 2 / 1000。
+- `TestIncReturnsRunningTotal`：100k 次逐次断言第 i 次返回 i。
+- `TestReset`：计数后重置、未计数重置、连续重置。
+
+定向变异（仓库外临时副本，改真实汇编）：
+
+- `ADD $1` → `ADD $2`：三个测试全部失败。
+- 删掉 Reset 的 `MOVD ZR, ·value(SB)`：三个测试全部失败。
+
+**验收（2026-11-23）**
+
+```text
+gofmt -l .           # 空
+go vet ./...         # 空
+go test ./...        # 5 个包通过
+go build -o snake .  # 成功
+```
+
+objdump 关键输出（行号以当前文件为准）：
+
+```text
+TEXT goplan9snake/internal/counter.Inc.abi0(SB)
+  counter_arm64.s:8   ADRP 1847296(PC), R27
+  counter_arm64.s:8   MOVD 736(R27), R0
+  counter_arm64.s:9   ADD $1, R0, R0
+  counter_arm64.s:10  ADRP 1847296(PC), R27
+  counter_arm64.s:10  MOVD R0, 736(R27)
+  counter_arm64.s:11  MOVD R0, 8(RSP)
+  counter_arm64.s:12  RET
+TEXT goplan9snake/internal/counter.Reset.abi0(SB)
+  counter_arm64.s:37  ADRP 1847296(PC), R27
+  counter_arm64.s:37  MOVD ZR, 736(R27)
+  counter_arm64.s:38  RET
+```
+
+要点：
+
+- `ret+0(FP)` 在机器码里是 `8(RSP)`；`0(RSP)` 是返回地址，虚 FP 从 `8(RSP)` 开始。
+- 每个 `·value(SB)` 引用展开成 `ADRP + MOVD`。`R27` 是 Go 汇编器保留的临时寄存器（REGTMP），由汇编器生成，不是源码用了 R27。
+- `MOVD ZR, ·value(SB)` 一条 store 完成清零。
+- 复用符号地址的变体（`MOVD $·value(SB), R1`）指令数不变，benchmark 无差异，已记录在 `counter_arm64.s` 的 `// [优化建议]` 中。
+
+**M1 剩余**
+
+- 代码项全部完成：CellIndex、Clamp、AbsDiff、SumTo、Xorshift64、FillByte、Inc/Reset。
+- 只剩 ROADMAP 的知识自查项：MOVD/MOVW 符号扩展、`·counter(SB)` 与 `counter<>(SB)`、BSS 为什么 `NOPTR`。
+- ROADMAP 复选框待用户确认后再勾选。
