@@ -408,6 +408,31 @@ class AsmHoverProvider {
       return new vscode.Hover(markdown);
     }
 
+    const arch = tooling.architectureFor(
+      document.uri.fsPath,
+      document.getText()
+    );
+
+    // A dotted mnemonic such as MOVD.P spans the word regex boundary, so match
+    // it separately. The regex only fits uppercase instruction shapes, which
+    // keeps register modifiers like R1.SXTH on the plain-register path below.
+    const suffixedRange = document.getWordRangeAtPosition(
+      position,
+      /[A-Z][A-Z0-9]+\.[PW]/
+    );
+    if (suffixedRange) {
+      const suffixed = document.getText(suffixedRange);
+      const base = suffixed.slice(0, suffixed.lastIndexOf('.'));
+      const doc = instructionDoc(base, arch);
+      const syntax = instructionSyntax(suffixed, arch);
+      if (doc && syntax) {
+        return new vscode.Hover(
+          new vscode.MarkdownString(`${doc}\n\n${syntax}`),
+          suffixedRange
+        );
+      }
+    }
+
     const range = document.getWordRangeAtPosition(
       position,
       /[A-Za-z_][A-Za-z0-9_]*/
@@ -441,10 +466,6 @@ class AsmHoverProvider {
       return new vscode.Hover(new vscode.MarkdownString(FLAGS[word]), range);
     }
 
-    const arch = tooling.architectureFor(
-      document.uri.fsPath,
-      document.getText()
-    );
     const doc = instructionDoc(word, arch);
     if (doc) {
       const syntax = instructionSyntax(word, arch);

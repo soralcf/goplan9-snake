@@ -4,8 +4,8 @@
 // the Go assembler; `example` holds concrete operands and is assembled by
 // scripts/check-syntax.js. W/S variants reuse the base entry at lookup time.
 
-function f(args, effect, example) {
-  return { args, effect, example };
+function f(args, effect, example, suffix) {
+  return { args, effect, example, suffix };
 }
 
 function addSub(operator, setFlags) {
@@ -119,11 +119,15 @@ const FMOV_FORMS = {
     f('Fd, sym(SB)', 'store to a symbol', 'F1, ·foo(SB)'),
     f('Rm, Fd', 'move an integer register to a floating-point register', 'R1, F1'),
     f('Fm, Rd', 'move a floating-point register to an integer register', 'F1, R1'),
+    f('off(Rn), Fd', 'post-index load: load the value, then Rn += off', '8(R1), F1', '.P'),
+    f('Fd, off(Rn)', 'post-index store: store the value, then Rn += off', 'F1, 8(R2)', '.P'),
+    f('off(Rn), Fd', 'pre-index load: Rn += off, then load the value', '8(R1), F1', '.W'),
+    f('Fd, off(Rn)', 'pre-index store: Rn += off, then store the value', 'F1, 8(R2)', '.W'),
   ],
   operands:
     'Fd/Fm are F0–F31; Rm/Rd are integer registers; off(Rn) is a signed offset; sym(SB) is a static symbol.',
   notes:
-    'FMOVS moves 32-bit values and FMOVD moves 64-bit values. .P/.W add post-/pre-index writeback.',
+    'FMOVS moves 32-bit values and FMOVD moves 64-bit values. .P/.W add post-/pre-index writeback to loads and stores; the writeback offset is a signed 9-bit byte offset (-256..255).',
 };
 
 const BRANCH_FORMS = {
@@ -147,11 +151,15 @@ const INSTRUCTION_SYNTAX = {
       f('Rd, (Rn)', 'store 64 bits', 'R1, (R2)'),
       f('Rd, off(Rn)', 'store at an offset', 'R1, 8(R2)'),
       f('Rd, sym(SB)', 'store to a symbol', 'R1, ·foo(SB)'),
+      f('off(Rn), Rd', 'post-index load: load 64 bits, then Rn += off', '8(R1), R2', '.P'),
+      f('Rd, off(Rn)', 'post-index store: store 64 bits, then Rn += off', 'R1, 8(R2)', '.P'),
+      f('off(Rn), Rd', 'pre-index load: Rn += off, then load 64 bits', '8(R1), R2', '.W'),
+      f('Rd, off(Rn)', 'pre-index store: Rn += off, then store 64 bits', 'R1, 8(R2)', '.W'),
     ],
     operands:
       'Rd is a register; $imm is an immediate; off(Rn) is a signed offset from Rn; sym(SB) is a static symbol.',
     notes:
-      'Exactly two operands. .P/.W add post-/pre-index writeback: `MOVD.P off(Rn), Rd`, `MOVD.W off(Rn), Rd`. Use FMOVD to move between R and F registers.',
+      'Exactly two operands. .P/.W add post-/pre-index writeback to loads and stores; the writeback offset is an unscaled signed 9-bit byte offset (-256..255). Use FMOVD to move between R and F registers.',
   },
   MOVW: {
     forms: [
@@ -163,11 +171,15 @@ const INSTRUCTION_SYNTAX = {
       f('Rd, (Rn)', 'store 32 bits', 'R1, (R2)'),
       f('Rd, off(Rn)', 'store at an offset', 'R1, 8(R2)'),
       f('Rd, sym(SB)', 'store to a symbol', 'R1, ·foo(SB)'),
+      f('off(Rn), Rd', 'post-index load: load signed 32 bits, then Rn += off', '8(R1), R2', '.P'),
+      f('Rd, off(Rn)', 'post-index store: store low 32 bits, then Rn += off', 'R1, 8(R2)', '.P'),
+      f('off(Rn), Rd', 'pre-index load: Rn += off, then load signed 32 bits', '8(R1), R2', '.W'),
+      f('Rd, off(Rn)', 'pre-index store: Rn += off, then store low 32 bits', 'R1, 8(R2)', '.W'),
     ],
     operands:
       'Rd is a register; $imm is an immediate; off(Rn) is a signed offset from Rn; sym(SB) is a static symbol.',
     notes:
-      'Exactly two operands. Loads sign-extend into the 64-bit destination. .P/.W add post-/pre-index writeback.',
+      'Exactly two operands. Loads sign-extend into the 64-bit destination. .P/.W add post-/pre-index writeback to loads and stores; the writeback offset is a signed 9-bit byte offset (-256..255).',
   },
   MOVWU: {
     forms: [
@@ -178,10 +190,14 @@ const INSTRUCTION_SYNTAX = {
       f('Rd, (Rn)', 'store 32 bits', 'R1, (R2)'),
       f('Rd, off(Rn)', 'store at an offset', 'R1, 8(R2)'),
       f('Rd, sym(SB)', 'store to a symbol', 'R1, ·foo(SB)'),
+      f('off(Rn), Rd', 'post-index load: load 32 bits unsigned, then Rn += off', '8(R1), R2', '.P'),
+      f('Rd, off(Rn)', 'post-index store: store low 32 bits, then Rn += off (canonical MOVW.P)', 'R1, 8(R2)', '.P'),
+      f('off(Rn), Rd', 'pre-index load: Rn += off, then load 32 bits unsigned', '8(R1), R2', '.W'),
+      f('Rd, off(Rn)', 'pre-index store: Rn += off, then store low 32 bits (canonical MOVW.W)', 'R1, 8(R2)', '.W'),
     ],
     operands:
       'Rd is a register; off(Rn) is a signed offset from Rn; sym(SB) is a static symbol.',
-    notes: 'Exactly two operands. An immediate load is not accepted; use MOVW for that.',
+    notes: 'Exactly two operands. An immediate load is not accepted; use MOVW for that. .P/.W add post-/pre-index writeback; a store writeback canonicalizes to MOVW.P/MOVW.W.',
   },
   MOVH: {
     forms: [
@@ -192,10 +208,14 @@ const INSTRUCTION_SYNTAX = {
       f('Rd, (Rn)', 'store 16 bits', 'R1, (R2)'),
       f('Rd, off(Rn)', 'store at an offset', 'R1, 8(R2)'),
       f('Rd, sym(SB)', 'store to a symbol', 'R1, ·foo(SB)'),
+      f('off(Rn), Rd', 'post-index load: load signed 16 bits, then Rn += off', '8(R1), R2', '.P'),
+      f('Rd, off(Rn)', 'post-index store: store low 16 bits, then Rn += off', 'R1, 8(R2)', '.P'),
+      f('off(Rn), Rd', 'pre-index load: Rn += off, then load signed 16 bits', '8(R1), R2', '.W'),
+      f('Rd, off(Rn)', 'pre-index store: Rn += off, then store low 16 bits', 'R1, 8(R2)', '.W'),
     ],
     operands:
       'Rd is a register; off(Rn) is a signed offset from Rn; sym(SB) is a static symbol.',
-    notes: 'Exactly two operands. An immediate load is not accepted.',
+    notes: 'Exactly two operands. An immediate load is not accepted. .P/.W add post-/pre-index writeback; the writeback offset is a signed 9-bit byte offset (-256..255).',
   },
   MOVHU: {
     forms: [
@@ -206,10 +226,14 @@ const INSTRUCTION_SYNTAX = {
       f('Rd, (Rn)', 'store 16 bits', 'R1, (R2)'),
       f('Rd, off(Rn)', 'store at an offset', 'R1, 8(R2)'),
       f('Rd, sym(SB)', 'store to a symbol', 'R1, ·foo(SB)'),
+      f('off(Rn), Rd', 'post-index load: load 16 bits unsigned, then Rn += off', '8(R1), R2', '.P'),
+      f('Rd, off(Rn)', 'post-index store: store low 16 bits, then Rn += off (canonical MOVH.P)', 'R1, 8(R2)', '.P'),
+      f('off(Rn), Rd', 'pre-index load: Rn += off, then load 16 bits unsigned', '8(R1), R2', '.W'),
+      f('Rd, off(Rn)', 'pre-index store: Rn += off, then store low 16 bits (canonical MOVH.W)', 'R1, 8(R2)', '.W'),
     ],
     operands:
       'Rd is a register; off(Rn) is a signed offset from Rn; sym(SB) is a static symbol.',
-    notes: 'Exactly two operands. An immediate load is not accepted.',
+    notes: 'Exactly two operands. An immediate load is not accepted. .P/.W add post-/pre-index writeback; a store writeback canonicalizes to MOVH.P/MOVH.W.',
   },
   MOVB: {
     forms: [
@@ -220,10 +244,14 @@ const INSTRUCTION_SYNTAX = {
       f('Rd, (Rn)', 'store 8 bits', 'R1, (R2)'),
       f('Rd, off(Rn)', 'store at an offset', 'R1, 8(R2)'),
       f('Rd, sym(SB)', 'store to a symbol', 'R1, ·foo(SB)'),
+      f('off(Rn), Rd', 'post-index load: load signed 8 bits, then Rn += off', '8(R1), R2', '.P'),
+      f('Rd, off(Rn)', 'post-index store: store low 8 bits, then Rn += off', 'R1, 8(R2)', '.P'),
+      f('off(Rn), Rd', 'pre-index load: Rn += off, then load signed 8 bits', '8(R1), R2', '.W'),
+      f('Rd, off(Rn)', 'pre-index store: Rn += off, then store low 8 bits', 'R1, 8(R2)', '.W'),
     ],
     operands:
       'Rd is a register; off(Rn) is a signed offset from Rn; sym(SB) is a static symbol.',
-    notes: 'Exactly two operands. An immediate load is not accepted.',
+    notes: 'Exactly two operands. An immediate load is not accepted. .P/.W add post-/pre-index writeback; the writeback offset is a signed 9-bit byte offset (-256..255).',
   },
   MOVBU: {
     forms: [
@@ -234,10 +262,14 @@ const INSTRUCTION_SYNTAX = {
       f('Rd, (Rn)', 'store 8 bits', 'R1, (R2)'),
       f('Rd, off(Rn)', 'store at an offset', 'R1, 8(R2)'),
       f('Rd, sym(SB)', 'store to a symbol', 'R1, ·foo(SB)'),
+      f('off(Rn), Rd', 'post-index load: load 8 bits unsigned, then Rn += off', '8(R1), R2', '.P'),
+      f('Rd, off(Rn)', 'post-index store: store low 8 bits, then Rn += off (canonical MOVB.P)', 'R1, 8(R2)', '.P'),
+      f('off(Rn), Rd', 'pre-index load: Rn += off, then load 8 bits unsigned', '8(R1), R2', '.W'),
+      f('Rd, off(Rn)', 'pre-index store: Rn += off, then store low 8 bits (canonical MOVB.W)', 'R1, 8(R2)', '.W'),
     ],
     operands:
       'Rd is a register; off(Rn) is a signed offset from Rn; sym(SB) is a static symbol.',
-    notes: 'Exactly two operands. An immediate load is not accepted.',
+    notes: 'Exactly two operands. An immediate load is not accepted. .P/.W add post-/pre-index writeback; a store writeback canonicalizes to MOVB.P/MOVB.W.',
   },
   MOVZ: {
     forms: [
@@ -265,22 +297,26 @@ const INSTRUCTION_SYNTAX = {
       f('(Rn), (Rd1, Rd2)', 'load a pair from [Rn]', '(R1), (R2, R3)'),
       f('off(Rn), (Rd1, Rd2)', 'load a pair at an offset', '8(R1), (R2, R3)'),
       f('sym(SB), (Rd1, Rd2)', 'load a pair from a symbol', '·foo(SB), (R1, R2)'),
+      f('off(Rn), (Rd1, Rd2)', 'post-index load: load the pair, then Rn += off', '16(R1), (R2, R3)', '.P'),
+      f('off(Rn), (Rd1, Rd2)', 'pre-index load: Rn += off, then load the pair', '16(R1), (R2, R3)', '.W'),
     ],
     operands:
       'Rd1/Rd2 are written as a parenthesized register pair; Rn is the base register; off is a signed offset.',
     notes:
-      'Exactly two operands, and the destination is always a register pair. .P/.W add post-/pre-index writeback: `LDP.P off(Rn), (Rd1, Rd2)`.',
+      'Exactly two operands, and the destination is always a register pair. .P/.W add post-/pre-index writeback: `LDP.P off(Rn), (Rd1, Rd2)`. The writeback offset is scaled by the access size and must be a multiple of it (8 bytes for LDP, 4 for LDPW).',
   },
   STP: {
     forms: [
       f('(Rs1, Rs2), (Rn)', 'store a pair to [Rn]', '(R1, R2), (R3)'),
       f('(Rs1, Rs2), off(Rn)', 'store a pair at an offset', '(R1, R2), 8(R3)'),
       f('(Rs1, Rs2), sym(SB)', 'store a pair to a symbol', '(R1, R2), ·foo(SB)'),
+      f('(Rs1, Rs2), off(Rn)', 'post-index store: store the pair, then Rn += off', '(R1, R2), 16(R3)', '.P'),
+      f('(Rs1, Rs2), off(Rn)', 'pre-index store: Rn += off, then store the pair', '(R1, R2), 16(R3)', '.W'),
     ],
     operands:
       'Rs1/Rs2 are written as a parenthesized register pair; Rn is the base register; off is a signed offset.',
     notes:
-      'Exactly two operands, and the source is always a register pair. .P/.W add post-/pre-index writeback.',
+      'Exactly two operands, and the source is always a register pair. .P/.W add post-/pre-index writeback: `STP.P (Rs1, Rs2), off(Rn)`. The writeback offset is scaled by the access size and must be a multiple of it (8 bytes for STP, 4 for STPW).',
   },
   LDPSW: {
     forms: [
@@ -582,10 +618,22 @@ for (const name of [
   INSTRUCTION_SYNTAX[name] = BRANCH_FORMS;
 }
 
+const SUFFIXED_NAME = /^([A-Z][A-Z0-9]*)\.([PW])$/;
+
 function lookup(name) {
   const exact = INSTRUCTION_SYNTAX[name];
   if (exact) {
     return exact;
+  }
+  const suffixed = SUFFIXED_NAME.exec(name);
+  if (suffixed) {
+    const base = lookup(suffixed[1]);
+    if (!base) {
+      return undefined;
+    }
+    const suffix = `.${suffixed[2]}`;
+    const forms = base.forms.filter((form) => form.suffix === suffix);
+    return forms.length > 0 ? { ...base, forms } : undefined;
   }
   if (name.endsWith('W')) {
     const base = INSTRUCTION_SYNTAX[name.slice(0, -1)];
@@ -607,8 +655,10 @@ function instructionSyntax(name, arch) {
   if (!entry) {
     return undefined;
   }
-  const rows = entry.forms.map(({ args, effect }) => ({
-    syntax: args ? `${name}  ${args}` : name,
+  const rows = entry.forms.map(({ args, effect, suffix }) => ({
+    syntax: args
+      ? `${name}${suffix && !name.endsWith(suffix) ? suffix : ''}  ${args}`
+      : name,
     effect,
   }));
   const width = rows.reduce((max, row) => Math.max(max, row.syntax.length), 0);

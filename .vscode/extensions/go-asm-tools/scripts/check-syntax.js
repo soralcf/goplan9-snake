@@ -71,6 +71,8 @@ const INVALID = [
   ['JMP R1', 'JMP requires parentheses for a register target'],
   ['MOVD F1, R1', 'MOVD does not move between R and F registers'],
   ['MOVD $1, (R1)', 'only $0 is special-cased to ZR for an immediate store'],
+  ['MOVD.P R1, R2', 'post-index requires a base register in the address'],
+  ['STP.P (R1, R2), 7(R3)', 'pair writeback offset must be a multiple of 8'],
   ['MOVH $1, R1', 'MOVH does not accept an immediate'],
   ['MOVWU $1, R1', 'MOVWU does not accept an immediate'],
   ['MOVB $1, R1', 'MOVB does not accept an immediate'],
@@ -97,6 +99,25 @@ function main() {
     }
   }
 
+  // Hover looks up dotted names such as MOVD.P separately; each lookup must
+  // yield exactly the rows carrying that suffix, and only when the base entry
+  // documents the suffix at all.
+  for (const [name, entry] of Object.entries(INSTRUCTION_SYNTAX)) {
+    for (const suffix of ['.P', '.W']) {
+      const forms = entry.forms.filter((form) => form.suffix === suffix);
+      const dotted = syntaxEntry(`${name}${suffix}`, 'arm64');
+      if (forms.length > 0 && !dotted) {
+        errors.push(`missing suffixed syntax: ${name}${suffix}`);
+      }
+      if (forms.length === 0 && dotted) {
+        errors.push(`unexpected suffixed syntax: ${name}${suffix}`);
+      }
+      if (dotted && dotted.forms.some((form) => form.suffix !== suffix)) {
+        errors.push(`suffixed syntax leaks other forms: ${name}${suffix}`);
+      }
+    }
+  }
+
   let checked = 0;
   let index = 0;
   for (const name of names) {
@@ -109,7 +130,7 @@ function main() {
       continue;
     }
     for (const form of entry.forms) {
-      const instruction = `${name} ${form.example}`.trim();
+      const instruction = `${name}${form.suffix || ''} ${form.example}`.trim();
       const failure = assemble(instruction, index);
       index += 1;
       checked += 1;
