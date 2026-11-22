@@ -6,6 +6,12 @@
 
 > 仓库里的计划文档不包含游戏实现代码。代码由你亲手写；Claude 负责设定验收目标、提供参考资料、审查和调试协助。
 
+## 当前进度
+
+- M0、M1 已完成并验收（M1 收尾于 2026-11-23）。
+- 下一步：M2 — Darwin 系统调用与终端生命周期。
+- 函数契约、测试设计和关键指令记录在 [docs/M1-NOTES.md](docs/M1-NOTES.md)。
+
 ---
 
 ## 最终验收（Definition of Done）
@@ -57,26 +63,28 @@ go build -o snake . && ./snake
 - Go arm64 保留寄存器：`R18`（平台）、`R27`/`R28`（编译器/链接器）、`R29`（FP）、`R30`（LR）。通用代码用 `R0`–`R17`、`R19`–`R26`。
 - Go 源文件里的 `const` 会生成到 `go_asm.h`，汇编里 `#include "go_asm.h"` 后用 `const_Name` 引用。
 - 包级汇编 BSS 可以不声明在 Go 里：`GLOBL ·buf(SB), NOPTR, $const_MaxCells*4` 可直接链接；跨 `.s` 文件用 `·buf(SB)` 访问。
-- Go 调用汇编函数时使用 ABI0；`go tool objdump` 会显示 `main.foo.abi0` 符号，编译器自动生成 ABI 包装。
+- Go 调用手写汇编函数时，编译器生成 ABIInternal → ABI0 包装；`go tool objdump` 会显示 `goplan9snake/internal/arith.Add.abi0` 这类符号，而汇编函数本身是 ABI0。
 
 更详细的技术说明见 [docs/DESIGN.md](docs/DESIGN.md)。
 
 ---
 
-## 建议目录
+## 目录与代码分工
+
+当前（M0–M1）：
 
 | 文件 | 职责 | 语言 |
 |---|---|---|
-| `main.go` | `func main() { run() }`；仅入口 | Go |
-| `api.go` | 汇编函数的 Go 声明、状态码常量、`go:cgo_import_dynamic` | Go（无逻辑） |
-| `game_arm64.s` | 棋盘状态、初始化、移动、吃食物、胜负判定 | Plan 9 asm |
-| `path_arm64.s` | Hamiltonian 环、环位置、安全窗口 BFS、兜底策略 | Plan 9 asm |
-| `render_arm64.s` | 帧缓冲、HUD、边框、ANSI 序列 | Plan 9 asm |
-| `sys_darwin_arm64.s` | `write`、`ioctl`、`exit`、`usleep` 分片封装 | Plan 9 asm |
-| `main_darwin_arm64.s` | 主循环、终端生命周期、胜利/失败收尾 | Plan 9 asm |
-| `*_test.go` | 单元测试、不变量测试、Go 参考实现、pty/性能测试 | Go（仅测试） |
+| `main.go` | 入口；当前调用 `arith.Add(1, 1)` 验证链路 | Go |
+| `internal/arith/arith.go` | `Add`、`Clamp`、`AbsDiff`、`SumTo` 的无函数体声明 | Go（无逻辑） |
+| `internal/arith/arith_arm64.s` | 上述函数的汇编实现 | Plan 9 asm |
+| `internal/grid/grid_arm64.s` | `CellIndex` | Plan 9 asm |
+| `internal/rng/rng_arm64.s` | `Xorshift64` | Plan 9 asm |
+| `internal/mem/mem_arm64.s` | `FillByte` | Plan 9 asm |
+| `internal/counter/counter_arm64.s` | `Inc`、`Reset`（BSS 计数器） | Plan 9 asm |
+| `internal/*/*_test.go` | 表驱动测试、Go oracle、随机对拍 | Go（仅测试） |
 
-文件名带 `_arm64.s` 后缀即可被 Go 工具链识别为 arm64 专用；系统调用文件建议带 `_darwin_arm64.s`，方便以后考虑 Linux 移植。
+M2 起继续按 `internal/<pkg>/` 分包：系统调用、游戏状态/移动、寻路、渲染、主循环各成模块。共享 BSS 的模块建议放在同一个包内，避免跨包引用私有符号；跨包可调用的汇编函数必须导出。文件名带 `_arm64.s` 后缀即可被 Go 工具链识别为 arm64 专用；系统调用文件建议带 `_darwin_arm64.s`，方便以后考虑 Linux 移植。
 
 ---
 
@@ -84,9 +92,9 @@ go build -o snake . && ./snake
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
-| M0 | 工程骨架与 ABI0 热身 | 未开始 |
-| M1 | 汇编基本功：数据、循环、分支、BSS | 未开始 |
-| M2 | Darwin 系统调用与终端生命周期 | 未开始 |
+| M0 | 工程骨架与 ABI0 热身 | 已完成（[笔记](docs/M0-NOTES.md)） |
+| M1 | 汇编基本功：数据、循环、分支、BSS | 已完成（[笔记](docs/M1-NOTES.md)） |
+| M2 | Darwin 系统调用与终端生命周期 | 下一步 |
 | M3 | 游戏状态与移动核心 | 未开始 |
 | M4 | 帧渲染与主循环 | 未开始 |
 | M5 | Hamiltonian 环，保证通关 | 未开始 |
@@ -100,12 +108,11 @@ go build -o snake . && ./snake
 
 ## 协作方式
 
-你可以按自己的节奏推进。每完成一个里程碑，把下面内容发给我：
+你可以按自己的节奏推进。每完成一个函数或里程碑，按需提供：
 
 1. 相关文件或 `git diff`。
 2. 你运行过的命令和完整输出（测试、`go vet`、`go build`）。
-3. 对“本里程碑你应该能回答的问题”的答案（用自己的话）。
-4. 卡住的地方，以及你已经尝试过什么。
+3. 卡住的地方，以及你已经尝试过什么。
 
 我会：
 
@@ -120,8 +127,12 @@ go build -o snake . && ./snake
 
 ## 文档
 
-- [docs/ROADMAP.md](docs/ROADMAP.md) — M0–M8 里程碑、验收标准、常见坑、学习检查点。
+- [docs/ROADMAP.md](docs/ROADMAP.md) — M0–M8 里程碑、任务、验收命令和常见坑。
 - [docs/DESIGN.md](docs/DESIGN.md) — 架构、BSS 布局、ABI0、系统调用、Hamiltonian + 安全窗口 BFS、渲染与性能。
+- [docs/M0-NOTES.md](docs/M0-NOTES.md) — 工程骨架、ABI0、`go vet` 与 objdump 验收记录。
+- [docs/M1-NOTES.md](docs/M1-NOTES.md) — M1 函数契约、测试、符号扩展、BSS 与验收记录。
+- [docs/M1-TWOS-COMPLEMENT-NOTES.md](docs/M1-TWOS-COMPLEMENT-NOTES.md) — 补码、溢出与 `AbsDiff` 契约专题。
+- [docs/IMPLEMENTATION-OVERVIEW.md](docs/IMPLEMENTATION-OVERVIEW.md) — 用通俗语言说明各模块和函数职责。
 - [docs/REFERENCES.md](docs/REFERENCES.md) — 官方文档、中文教材、Go 源码示例、ARM64 手册、调试工具和阅读顺序。
 
 ---

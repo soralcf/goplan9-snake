@@ -2,6 +2,8 @@
 
 本文是实现前的技术蓝图：模块边界、内存布局、ABI、系统调用、算法不变量、渲染与测试策略。它描述“应该满足什么”，不提供游戏实现代码。
 
+> 状态（2026-11-23）：M0、M1 已完成，实现位于 `internal/<pkg>/`。本文的 BSS 布局、算法和接口契约仍然适用；M2 起的文件位置和包边界可按 `internal/<pkg>/` 风格调整。已验收的细节以 [M0-NOTES.md](M0-NOTES.md)、[M1-NOTES.md](M1-NOTES.md) 为准。
+
 ---
 
 ## 1. 运行环境与已验证事实
@@ -68,7 +70,7 @@ Go runtime 的异步抢占会让裸 `poll/select` 在约 20ms 内返回 `EINTR`�
 - 包级 BSS 不需要在 Go 里声明：
   `GLOBL ·buf(SB), NOPTR, $const_MaxCells*4` 可直接链接，跨 `.s` 文件用 `·buf(SB)` 访问。
 - `#include "go_asm.h"` 后可用 Go 常量：`const_boardMax`、`const_MaxCells` 等。
-- Go 调用汇编函数走 ABI0；`go tool objdump` 显示 `main.func.abi0`，编译器负责生成 ABI 包装。
+- Go 调用手写汇编函数时，编译器生成 ABIInternal → ABI0 包装；`go tool objdump` 显示 `main.func.abi0`，汇编函数本身仍是 ABI0。
 - arm64 保留寄存器：`R18`（平台）、`R27`/`R28`（编译器/链接器）、`R29`（FP）、`R30`（LR）。业务代码使用 `R0`–`R17`、`R19`–`R26`。
 - `go vet` 会检查汇编函数的参数名、偏移和大小；用好它。注意：`go build` 不做这项检查（实测参数大小写错也能构建），所以每个里程碑都要跑 `go vet`。
 
@@ -80,11 +82,12 @@ Go runtime 的异步抢占会让裸 `poll/select` 在约 20ms 内返回 `EINTR`�
 
 产品路径中只允许：
 
-| 文件 | 内容 | 说明 |
+| 位置 | 内容 | 说明 |
 |---|---|---|
 | `main.go` | `func main() { run() }` | 唯一入口 |
-| `api.go` | 汇编函数声明（无函数体）、常量、`//go:cgo_import_dynamic` | 无业务逻辑 |
-| `*_test.go` | 测试、Go 参考实现、pty/性能测试 | 只在测试中运行 |
+| `internal/<pkg>/<pkg>.go` | 汇编函数声明（无函数体）、常量、`//go:cgo_import_dynamic` | 无业务逻辑 |
+| `internal/<pkg>/<pkg>_arm64.s` | 手写汇编实现 | 游戏逻辑 |
+| `internal/<pkg>/<pkg>_test.go` | 测试、Go 参考实现、pty/性能测试 | 只在测试中运行 |
 
 常量放在 Go 里是为了让 `go_asm.h` 导出；例如：
 
@@ -135,16 +138,18 @@ ABI0 汇编函数 ·foo(SB)
 
 ## 3. 文件与符号组织
 
-建议：
+M0–M1 已按 `internal/<pkg>/` 落地（见 [M1-NOTES.md](M1-NOTES.md)）。M2–M8 可以沿同一风格按包拆分；下面的符号职责划分保持不变。共享 BSS 的模块建议放在同一个包内，跨包调用的符号必须导出。
 
-| 文件 | 符号/职责 |
+建议的模块划分（文件放在哪个包由实现时决定）：
+
+| 文件（包内） | 符号/职责 |
 |---|---|
 | `game_arm64.s` | 状态、`initGame`、`tickWithDir`、食物、getter/setter |
 | `path_arm64.s` | 环构造、`cycleNext`/`cyclePos`、BFS、窗口判定、`chooseNext` |
 | `render_arm64.s` | 帧缓冲、HUD、边框、ANSI 序列、`render` |
 | `sys_darwin_arm64.s` | `sysWrite`、`sysIoctl`、`sysExit`、`sleepUS` |
 | `main_darwin_arm64.s` | `run()`、终端生命周期、主循环、收尾 |
-| `api.go` | 上述函数的 Go 声明、常量、动态导入指令 |
+| `<pkg>.go` | 上述函数的 Go 声明、常量、动态导入指令 |
 | `main.go` | 入口 |
 
 跨文件共享：

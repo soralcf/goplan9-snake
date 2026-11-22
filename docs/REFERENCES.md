@@ -159,8 +159,8 @@ ANSI 要点：
 
 | 工具/资料 | 链接/命令 | 用途 |
 |---|---|---|
-| `go tool objdump` | `go tool objdump -s 'main\.tick' ./snake` | 看真实指令；`-gnu` 对照 GNU 语法 |
-| `go tool nm` | `go tool nm ./snake \| grep main\.` | 查符号，确认 `.abi0` |
+| `go tool objdump` | `go tool objdump -s 'goplan9snake/internal/arith\.Add' ./snake` | 看真实指令；`-gnu` 对照 GNU 语法 |
+| `go tool nm` | `go tool nm ./snake \| grep 'goplan9snake/internal/arith\.Add'` | 查符号，确认 `.abi0` |
 | `go tool asm` | `go doc cmd/asm` | 单独汇编/语法检查 |
 | `go vet` | `go vet ./...` | `asmdecl` 检查汇编声明 |
 | Delve | <https://github.com/go-delve/delve> | 汇编级调试；`dlv exec ./snake` |
@@ -180,8 +180,8 @@ Delve 常用命令：
 
 ```text
 dlv exec ./snake
-(dlv) disassemble -l main.tick
-(dlv) break main.tick
+(dlv) disassemble -l goplan9snake/internal/arith.Add
+(dlv) break goplan9snake/internal/arith.Add
 (dlv) continue
 (dlv) step-instruction
 (dlv) regs
@@ -203,6 +203,12 @@ dlv exec ./snake
 | M6 | BFS 基础；本 DESIGN 的测试策略 | `internal/bytealg` 的搜索循环（语法参考） |
 | M7 | Johnflux 的捷径/安全讨论；本 DESIGN 的安全窗口 | 自己画环序图，写不变量证明 |
 | M8 | Delve CLI 文档；`go tool objdump` | `asmfmt`、性能测量 |
+
+当前已完成的 M0–M1 阅读材料：
+
+- [M0-NOTES.md](M0-NOTES.md)：ABI0、`go vet`、objdump 验收记录。
+- [M1-NOTES.md](M1-NOTES.md)：函数契约、符号扩展、BSS、objdump 流程。
+- [M1-TWOS-COMPLEMENT-NOTES.md](M1-TWOS-COMPLEMENT-NOTES.md)：补码与 `AbsDiff` 契约。
 
 ---
 
