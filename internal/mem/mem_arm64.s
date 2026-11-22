@@ -49,14 +49,14 @@ _done:
 //	ORR   R2<<32, R2      // R2 = v 重复 8 次
 //	LSR   $3, R1, R3      // 完整 8 字节组数
 //	CBZ   R3, _tail
-//_chunk:
+// _chunk:
 //	MOVD.P R2, 8(R0)
 //	SUBS   $1, R3, R3
 //	BNE    _chunk
-//_tail:
+// _tail:
 //	ANDW   $7, R1, R1     // 剩余 0..7 字节
 //	CBZ    R1, _done
-//_tailLoop:
+// _tailLoop:
 //	MOVB.P R2, 1(R0)
 //	SUBSW  $1, R1, R1
 //	BNE    _tailLoop
