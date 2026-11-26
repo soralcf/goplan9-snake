@@ -13,7 +13,7 @@
 - 最终 `length == W*H`，填满帧保持可见后恢复光标和主屏幕，打印胜利摘要，退出码 0。
 - 无头模式（不渲染、不睡眠）在固定种子下确定性通关，且满足测试内 tick 预算断言。
 - `gofmt -l .`、`./scripts/check-docs.sh`、`go test ./... -count=1`、`go vet ./...`、`go build -o snake .` 全部通过。
-- 产品代码边界：Go 文件仅含入口、无函数体声明、常量与动态导入指令；游戏状态、移动、寻路、渲染、系统调用全部位于 `*_arm64.s`。
+- 产品代码边界：Go 文件仅含入口、无函数体声明、常量与动态导入指令；游戏状态、移动、寻路、渲染、系统调用全部位于 `*_arm64.s` / `*_darwin_arm64.s`。
 
 ---
 
@@ -35,18 +35,21 @@
 
 ## 目录与代码分工
 
-| 路径 | 职责 | 语言 |
+| 路径 | 汇编文件 | 职责 |
 |---|---|---|
-| `main.go` | 唯一入口；M2-07 前调用 `arith.Add(1, 1)`，之后改为 `term.Run()` | Go |
-| `internal/arith/` | `Add`、`Clamp`、`AbsDiff`、`SumTo` | Go 声明 + Plan 9 asm |
-| `internal/grid/` | `CellIndex`（二维坐标转一维索引） | Go 声明 + Plan 9 asm |
-| `internal/rng/` | `Xorshift64`（无状态伪随机数步进） | Go 声明 + Plan 9 asm |
-| `internal/mem/` | `FillByte`（连续字节填充） | Go 声明 + Plan 9 asm |
-| `internal/counter/` | `Inc`、`Reset`（包级 `NOPTR` BSS 计数器） | Go 声明 + Plan 9 asm |
-| `internal/term/` | Darwin 系统调用常量、`sysWrite` 等终端与系统调用封装（M2 进行中） | Go 声明 + Plan 9 asm |
-| `internal/*/*_test.go` | 表驱动测试、Go oracle、随机对拍与边界断言 | Go（仅测试） |
+| `main.go` | — | 唯一入口；M2-07 前调用 `arith.Add(1, 1)`，之后改为 `term.Run()` |
+| `internal/arith/` | `arith_arm64.s` | `Add`、`Clamp`、`AbsDiff`、`SumTo` |
+| `internal/grid/` | `grid_arm64.s` | `CellIndex`（二维坐标转一维索引） |
+| `internal/rng/` | `rng_arm64.s` | `Xorshift64`（无状态伪随机数步进） |
+| `internal/mem/` | `mem_arm64.s` | `FillByte`（连续字节填充） |
+| `internal/counter/` | `counter_arm64.s` | `Inc`、`Reset`（包级 `NOPTR` BSS 计数器） |
+| `internal/term/` | `term_darwin_arm64.s` | Darwin 系统调用常量、`sysWrite` 等终端与系统调用封装（M2 进行中） |
+| `internal/*/*_test.go` | — | 表驱动测试、Go oracle、随机对拍与边界断言 |
 
-后续里程碑继续按 `internal/game`、`internal/render`、`internal/path` 分包；共享 BSS 的模块放在同一包内，跨包调用的汇编函数首字母大写导出。
+汇编文件命名规则（遵循 Go 构建约束 `<name>_<GOARCH>.s` 与 `<name>_<GOOS>_<GOARCH>.s`）：
+
+- **`*_arm64.s`（仅约束 CPU 架构 `GOARCH=arm64`）**：用于算术、网格、随机数、内存、游戏状态机、渲染缓冲拼接和寻路算法等**与操作系统无关**的纯 ARM64 指令实现。
+- **`*_darwin_arm64.s`（同时约束 `GOOS=darwin` 与 `GOARCH=arm64`）**：仅用于 `internal/term` 等直接耦合 Darwin 内核 `SVC $0x80`、BSD 调用号、`TIOCGWINSZ` 或 `libSystem.B.dylib` 的系统层。
 
 ---
 

@@ -57,19 +57,20 @@
 
 ### 2.1 文件命名与构建约束
 
-| 文件模式 | 目标架构 | 说明 |
-|---|---|---|
-| `*_arm64.s` | arm64 | 本项目使用；Go 构建约束自动生效 |
-| `*_amd64.s` | amd64 | 其他平台或对照实验 |
-| `*_arm.s` | arm（32 位） | 本项目不使用 |
-| `*_<arch>.s` | 由后缀决定 | 需要额外条件时配合 `//go:build` |
+Go 工具链根据文件名末尾的 `GOOS`（操作系统）与 `GOARCH`（CPU 架构）后缀自动施加构建约束：
+
+| 文件模式 | 约束维度 | 生效条件 | 本项目用途 |
+|---|---|---|---|
+| `*_arm64.s` | 仅 `GOARCH` | `GOARCH=arm64`（任意 OS） | 与操作系统无关的纯 ARM64 指令逻辑（`arith`、`grid`、`rng`、`mem`、`counter`、`game`、`render`、`path`） |
+| `*_darwin_arm64.s` | `GOOS` + `GOARCH` | `GOOS=darwin && GOARCH=arm64` | 耦合 Darwin 内核 `SVC $0x80`、BSD 调用号、`TIOCGWINSZ` 或 `libSystem.B.dylib` 的系统层（`internal/term/term_darwin_arm64.s`） |
+| `*_amd64.s` / `*_darwin_amd64.s` | `GOARCH=amd64` | x86-64 平台 | 仅作架构差异对照，本项目不实现 |
 
 规则：
 
-- 架构由文件名后缀决定；`.s` 文件与同包 `.go` 声明一起参与构建。
-- 每个 `.s` 文件包含 `#include "textflag.h"`；需要 Go 常量或结构体偏移时再包含 `go_asm.h`。
-- 手写汇编使用 ABI0；ABIInternal 的寄存器分配不属于本手册的手写范围。
-- 跨架构共享的算法可以放在 `*_<arch>.s` 中分别实现，但不要共享架构相关的指令宏。
+- **`darwin` 是操作系统（`GOOS`），`arm64` 是 CPU 架构（`GOARCH`）**：两者组合时顺序固定为 `*_<GOOS>_<GOARCH>.s`（如 `term_darwin_arm64.s`），不能反写成 `*_arm64_darwin.s`。
+- 只有真正依赖 Darwin 内核或 macOS 系统库的汇编文件才加 `_darwin_arm64.s`；纯寄存器运算、内存填充、状态机和寻路算法统一用 `*_arm64.s`，保持架构层与操作系统层边界清晰。
+- 每个 `.s` 文件包含 `#include "textflag.h"`；需要 Go 常量或结构体偏移时再包含 `#include "go_asm.h"`。
+- 手写汇编统一使用 ABI0。
 
 ### 2.2 arm64 与 amd64 对照
 

@@ -66,11 +66,14 @@
 ## 代码边界（硬性）
 
 - **产品 Go 文件（非 `*_test.go`）只允许**：`main` 入口、无函数体的汇编函数声明、供 `go_asm.h` 导出的 `const`、`//go:cgo_import_dynamic`。
-- **禁止**：用 `fmt`/`os`/`time`/`math/rand`/`syscall` 在 Go 中实现游戏逻辑，用 Go 切片/映射保存游戏状态，或把 `*_test.go` 中的 Go oracle 导入产品路径。所有游戏状态、移动、碰撞、食物生成、寻路、渲染、系统调用均写在 `*_arm64.s`。
+- **禁止**：用 `fmt`/`os`/`time`/`math/rand`/`syscall` 在 Go 中实现游戏逻辑，用 Go 切片/映射保存游戏状态，或把 `*_test.go` 中的 Go oracle 导入产品路径。所有游戏状态、移动、碰撞、食物生成、寻路、渲染、系统调用均写在 `*_arm64.s` 或 `*_darwin_arm64.s`。
 
 ## 汇编约定
 
-- 文件名：`*_arm64.s`（Darwin 系统调用文件用 `*_darwin_arm64.s`）；头部包含 `#include "textflag.h"`，需引用 Go 常量时加 `#include "go_asm.h"`（以 `const_Name` 访问）。
+- 文件名与构建约束：
+  - `*_arm64.s`（仅 `GOARCH` 约束）：不依赖操作系统内核接口的纯 ARM64 指令与 ABI0 逻辑（如 `arith`、`grid`、`rng`、`mem`、`counter`、`game`、`render`、`path`）。
+  - `*_darwin_arm64.s`（`GOOS_GOARCH` 双重约束）：依赖 Darwin 内核 `SVC $0x80`、BSD 系统调用号/errno、`TIOCGWINSZ` 或 macOS `libSystem.B.dylib` 的系统调用与终端层（如 `internal/term/term_darwin_arm64.s`）。
+- 头文件：每个 `.s` 头部包含 `#include "textflag.h"`；需引用 Go 常量时加 `#include "go_asm.h"`（以 `const_Name` 访问）。
 - 调用约定：手写汇编使用 ABI0，`TEXT ·Name(SB), NOSPLIT, $frame-argsize`。`argsize` 是**按 ABI0 栈布局后的总字节数**（含参数、返回值及返回值区前的 8 字节对齐填充，如 `CellIndex`、`Clamp` 为 `$0-20`），以 `go vet` 的 `expected` 为准。
 - 参数名与偏移（如 `a+0(FP)`、`b+8(FP)`）必须与 Go 声明一致；每次修改 `.s` 后必须跑 `go vet ./...`（`go build` 不检查参数大小与偏移）。
 - 符号可见性：跨包调用的汇编函数必须首字母大写导出；包内共享符号用 `·name(SB)`，文件内私有符号用 `name<>(SB)`。

@@ -115,7 +115,9 @@ for pat in \
 	'(IMPLEMENTATION-OVERVIEW.md)' \
 	'(M0-NOTES.md)' \
 	'(M1-NOTES.md)' \
-	'(M1-TWOS-COMPLEMENT-NOTES.md)'; do
+	'(M1-TWOS-COMPLEMENT-NOTES.md)' \
+	'`sys_darwin_arm64.s`' \
+	'`main_darwin_arm64.s`'; do
 	hits=$(grep -R -n -F "$pat" --include='*.md' . 2>/dev/null | grep -v '^./.git/' || true)
 	if [ -n "$hits" ]; then
 		fail "stale reference '$pat':"
