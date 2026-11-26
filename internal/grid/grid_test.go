@@ -6,20 +6,38 @@ import (
 	"testing"
 )
 
-// refCellIndex 是测试专用参考实现（oracle），不进入产品路径。
-// test oracle（测试预言 / 测试基准 / 预期值来源）。指的是“用来判定被测代码行为是否正确”的权威参考
-// 直接按定义写 y*w+x，不要从汇编逐句翻译。
+// refCellIndex 是测试专用参考实现（test oracle），不进入产品路径。
+// 直接按数学定义写 y*w + x，不要从汇编指令逐句翻译。
 func refCellIndex(x, y, w int32) int32 {
 	return y*w + x
 }
 
+// TestCellIndex 钉住一维索引公式 y*w + x 的参数顺序（x 列、y 行、w 宽）与 32 位补码回绕语义。
+//
+// 若把 x 与 y 对调（算成 x*w + y）或把 w 与 y 对调（算成 w + x*y），
+// 非对称坐标用例会立即失败。
 func TestCellIndex(t *testing.T) {
 	tests := []struct {
 		name    string
 		x, y, w int32
 		want    int32
 	}{
-		{"normal", 1, 2, 3, 7},
+		// 常规：原点、首行、首列与内部格，检验 x/y/w 参数位置没有写反。
+		{"origin", 0, 0, 10, 0},
+		{"first row", 5, 0, 10, 5},
+		{"first column", 0, 3, 10, 30},
+		{"interior cell", 1, 2, 3, 7},
+		{"typical board end", 39, 19, 40, 799},
+
+		// 符号：负坐标参与 32 位有符号乘加。
+		{"negative x offset", -1, 2, 10, 19},
+		{"negative y row", 3, -2, 10, -17},
+
+		// 精确边界：结果恰好到达 MaxInt32。
+		{"max int32 exact", math.MaxInt32 - 10, 1, 10, math.MaxInt32},
+
+		// 契约角落：超出 int32 上界时按 32 位二补码回绕。
+		{"max int32 plus one wraps to min", math.MaxInt32, 1, 1, math.MinInt32},
 	}
 
 	for _, tt := range tests {

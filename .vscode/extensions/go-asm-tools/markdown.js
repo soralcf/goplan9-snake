@@ -1,7 +1,7 @@
 'use strict';
 
 // A small, dependency-free Markdown renderer for the workspace handbook.
-// It intentionally supports only the subset used by docs/ASM-HANDBOOK.md:
+// It intentionally supports only the subset used by handbook/ASM-HANDBOOK.md:
 // headings, paragraphs, fenced code, tables, flat lists, blockquotes,
 // horizontal rules, inline code, bold, and links.
 

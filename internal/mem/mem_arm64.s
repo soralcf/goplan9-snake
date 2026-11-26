@@ -39,10 +39,9 @@ _done:
 //   逐字节 fill 已经是 store/内存带宽主导，少了 2 条指令也不变快；这个
 //   改动的价值是代码更短，不是吞吐。风险低：后索引只改 R0，R0 是调用者
 //   保存寄存器，返回后调用方不依赖；验证：现有 FillByte 全部测试。
-// - 真正有量级收益的是加宽存储：把 v 复制成 64 位字，每 8 字节一存。
-//   注意复制必须用 MOVBU，不能用 MOVB：Go 汇编的 MOVB 是符号扩展
-//   （LDRSB 语义），MOVB 读 0xA0 得到 0xffffffffffffffa0，再移位 OR 会填出
-//   a0 ff ff ...；我最初写成 MOVB，TestFillByte 立刻失败。
+// - 可选优化 2（8 字节宽存储，量级提升）：把 v 复制成 64 位字，每 8 字节一存。
+//   注意复制必须用 MOVBU 零扩展，不能用 MOVB：MOVB 会把 0xA0 符号扩展为
+//   0xffffffffffffffa0，移位或运算后会填出 a0 ff ff ...（TestFillByte 会立即失败）：
 //	MOVBU v+12(FP), R2
 //	ORR   R2<<8, R2
 //	ORR   R2<<16, R2

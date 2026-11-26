@@ -14,6 +14,7 @@ const {
   ARCH_ALIASES,
   architectureFor,
   getInstructionNames,
+  resolveGo,
 } = require('../tooling');
 
 const extensionRoot = path.resolve(__dirname, '..');
@@ -29,7 +30,7 @@ function goroot() {
     return process.env.GOROOT;
   }
   return cp
-    .execFileSync(process.env.GO || 'go', ['env', 'GOROOT'], {
+    .execFileSync(resolveGo(), ['env', 'GOROOT'], {
       encoding: 'utf8',
     })
     .trim();

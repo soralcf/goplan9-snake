@@ -17,7 +17,7 @@ TEXT ·Xorshift64(SB), NOSPLIT, $0-16
 //   共 6 条数据指令、6 级串行依赖。
 // - 可选优化（移位操作数形式）：ARM64 的 EOR 属于 shifted register 指令，
 //   移位直接写在源操作数里，一条指令完成“移位 + 异或”：
-//	MOVD s+0(FP), R0
+//	MOVD state+0(FP), R0
 //	EOR  R0<<13, R0
 //	EOR  R0>>7, R0
 //	EOR  R0<<17, R0

@@ -536,5 +536,6 @@ module.exports = {
   maskLines,
   parseInclude,
   resolveAsmfmt,
+  resolveGo,
   runAsmfmt,
 };

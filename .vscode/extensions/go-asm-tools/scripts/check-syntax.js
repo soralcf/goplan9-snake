@@ -12,13 +12,16 @@ const path = require('path');
 
 const { INSTRUCTION_DOCS, ARM64_DERIVED_VARIANTS } = require('../instruction-data');
 const { INSTRUCTION_SYNTAX, instructionSyntax, syntaxEntry } = require('../instruction-syntax');
+const { resolveGo } = require('../tooling');
+
+const goBin = resolveGo();
 
 function goroot() {
   if (process.env.GOROOT) {
     return process.env.GOROOT;
   }
   return cp
-    .execFileSync(process.env.GO || 'go', ['env', 'GOROOT'], {
+    .execFileSync(goBin, ['env', 'GOROOT'], {
       encoding: 'utf8',
     })
     .trim();
@@ -43,7 +46,7 @@ function assemble(instruction, index) {
   fs.writeFileSync(file, source);
   try {
     cp.execFileSync(
-      process.env.GO || 'go',
+      goBin,
       ['tool', 'asm', '-I', includeDir, '-o', object, file],
       {
         encoding: 'utf8',

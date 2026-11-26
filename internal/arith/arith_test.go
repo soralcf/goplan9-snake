@@ -5,21 +5,29 @@ import (
 	"testing"
 )
 
+// TestAdd 钉住 64 位整数加法契约：正数、负数、零以及 int64 极值处的二进制补码回绕。
 func TestAdd(t *testing.T) {
 	tests := []struct {
 		name string
 		a, b int64
 		want int64
 	}{
+		// 常规：正整数相加。
 		{"positive", 1, 2, 3},
 		{"positive large", 1000, 2000, 3000},
+
+		// 符号：负数与零。
 		{"negative", -1, -2, -3},
 		{"negative large", -1000, -2000, -3000},
 		{"zero", 0, 0, 0},
 		{"zero and positive", 0, 42, 42},
+
+		// 精确边界：紧贴 int64 上下界但不溢出。
 		{"max int64", math.MaxInt64, 0, math.MaxInt64},
 		{"min int64", math.MinInt64, 0, math.MinInt64},
 		{"min int64 plus one minus one", math.MinInt64 + 1, -1, math.MinInt64},
+
+		// 契约角落：越过极值时按 64 位二补码回绕。
 		{"max int64 plus one overflow", math.MaxInt64, 1, math.MinInt64},
 		{"min int64 minus one overflow", math.MinInt64, -1, math.MaxInt64},
 	}
@@ -43,23 +51,30 @@ func TestClamp(t *testing.T) {
 		v, lo, hi int32
 		want      int32
 	}{
+		// 常规：正区间内、贴边、越下界、越上界。
 		{"inside", 2, 1, 3, 2},
 		{"equals lo", 1, 1, 3, 1},
 		{"equals hi", 3, 1, 3, 3},
 		{"below lo", 0, 1, 3, 1},
 		{"above hi", 4, 1, 3, 3},
+
+		// 符号：负区间与跨零区间，检验有符号加载与有符号比较。
 		{"negative inside", -2, -5, -1, -2},
 		{"negative below lo", -6, -5, -1, -5},
 		{"above negative hi", 0, -5, -1, -1},
 		{"negative v in positive range", -1, 0, 10, 0},
+
+		// 精确边界：int32 极值与单点退化区间 lo == hi。
 		{"min int32 inside", math.MinInt32, math.MinInt32, math.MaxInt32, math.MinInt32},
 		{"min int32 below lo", math.MinInt32, math.MinInt32 + 1, math.MaxInt32, math.MinInt32 + 1},
 		{"max int32 inside", math.MaxInt32, math.MinInt32, math.MaxInt32, math.MaxInt32},
 		{"lo equals hi", 0, 1, 1, 1},
-		{"lo equals hi, v above", 2, 1, 1, 1},
+		{"lo equals hi with v above", 2, 1, 1, 1},
+
+		// 契约角落：lo > hi 时统一返回 hi，无论 v 落在何处。
 		{"lo greater than hi", 0, 3, 1, 1},
-		{"lo greater than hi, v between", 2, 3, 1, 1},
-		{"lo greater than hi, v above lo", 4, 3, 1, 1},
+		{"lo greater than hi with v between", 2, 3, 1, 1},
+		{"lo greater than hi with v above lo", 4, 3, 1, 1},
 	}
 
 	for _, tt := range tests {

@@ -11,7 +11,7 @@
 3. 找到 **Go Assembly Tools**（publisher: `local`），点击 **Install**。
 4. 执行 `Developer: Reload Window`。
 
-安装后打开 `add_arm64.s`，语言模式应显示为 **Go Assembly**。
+安装后打开 `internal/arith/arith_arm64.s`，语言模式应显示为 **Go Assembly**。
 
 如果修改了本扩展的 `package.json` 但版本没有更新：在 Extensions → Installed → Workspace 中先 **Uninstall**，再回到 `@recommended` 重新 **Install**，最后 Reload Window。
 

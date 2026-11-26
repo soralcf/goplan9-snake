@@ -143,46 +143,54 @@ TEXT ·Add(SB), NOSPLIT, $0-24
 
 ### 3.4 参数大小计算
 
-`argsize` 是参数与返回值的总字节数，不是参数个数。
+`argsize` 是**按 ABI0 栈布局后的总字节数**，不仅包含参数与返回值本身，还包含**返回值区之前的指针/寄存器对齐填充**（64 位平台上返回值区起始偏移向 8 字节对齐），不是类型宽度简单相加：
 
-| Go 类型 | 字节数 | 说明 |
-|---|---:|---|
-| `int32`、`uint32`、`rune` | 4 | 32 位整数 |
-| `int64`、`uint64`、指针 | 8 | 64 位整数/地址 |
-| `string` | 16 | 数据指针 + 长度 |
-| `slice` | 24 | 数据指针 + 长度 + 容量 |
-| `interface` | 16 | 类型指针 + 数据指针 |
+| Go 类型 | 字节数 | 对齐 | 说明 |
+|---|---:|---:|---|
+| `byte`、`uint8`、`int8`、`bool` | 1 | 1 | 单字节 |
+| `int16`、`uint16` | 2 | 2 | 16 位整数 |
+| `int32`、`uint32`、`rune` | 4 | 4 | 32 位整数 |
+| `int64`、`uint64`、指针 | 8 | 8 | 64 位整数/地址 |
+| `string` | 16 | 8 | 数据指针 + 长度 |
+| `slice` | 24 | 8 | 数据指针 + 长度 + 容量 |
+| `interface` | 16 | 8 | 类型指针 + 数据指针 |
 
-示例：`func Add(a, b int64) int64` 的参数大小为 `8 + 8 + 8 = 24`，所以写 `$0-24`。
+示例：
+
+- `func Add(a, b int64) int64`：`a+0`（8B）、`b+8`（8B）、`ret+16`（8B），总大小 `24` → `$0-24`。
+- `func CellIndex(x, y, w int32) int32`：`x+0`（4B）、`y+4`（4B）、`w+8`（4B），参数区在偏移 `12` 结束；返回值区向 8 字节对齐到 `ret+16`（偏移 `12..15` 为 4 字节填充），加上 4 字节返回值，总大小 `16 + 4 = 20` → `$0-20`（而不是 `$0-16`）。
+- `func FillByte(buf *byte, n int32, v byte)`：无返回值，`buf+0`（8B）、`n+8`（4B）、`v+12`（1B），总大小 `13` → `$0-13`。
+
+以 `go vet ./...` 的 `asmdecl` 检查结果为准（详见 [M1 笔记](docs/4.2-FUNDAMENTALS-NOTES.md)）。
 
 ### 3.5 符号与 FP 伪寄存器
 
 `FP` 是伪寄存器，不是硬件寄存器。汇编器根据 ABI0 栈布局把它翻译成实际的 `RSP` 偏移。本项目的实测输出：
 
 ```text
-10009b5c0 T main.Add.abi0
+10006a560 T goplan9snake/internal/arith.Add.abi0
 
-TEXT main.Add.abi0(SB) add_arm64.s
-  add_arm64.s:4    f94007e0    MOVD 8(RSP), R0
-  add_arm64.s:5    f9400be1    MOVD 16(RSP), R1
-  add_arm64.s:6    8b000021    ADD R0, R1, R1
-  add_arm64.s:7    f9000fe1    MOVD R1, 24(RSP)
-  add_arm64.s:8    d65f03c0    RET
+TEXT goplan9snake/internal/arith.Add.abi0(SB) .../internal/arith/arith_arm64.s
+  arith_arm64.s:5    f94007e0    MOVD 8(RSP), R0
+  arith_arm64.s:6    f9400be1    MOVD 16(RSP), R1
+  arith_arm64.s:7    8b000021    ADD R0, R1, R1
+  arith_arm64.s:8    f9000fe1    MOVD R1, 24(RSP)
+  arith_arm64.s:9    d65f03c0    RET
 ```
 
-手写 `.s` 使用 ABI0，符号名带 `.abi0`；Go 函数使用 ABIInternal。两者之间的转换由编译器/链接器处理，小函数上可能直接看到对 `.abi0` 符号的调用。硬件偏移由 ABI0 布局决定，不应手工推导；参数名和 `go vet` 才是正确的检查手段。
+手写 `.s` 使用 ABI0，符号名带 `.abi0`；Go 函数使用 ABIInternal。两者之间的转换由编译器/链接器处理，小函数上可能直接看到对 `.abi0` 符号的调用。硬件偏移由 ABI0 布局决定（进入 ABI0 函数时 `0(RSP)` 为返回地址槽，虚 `FP` 从 `8(RSP)` 开始），不应手工硬编码 `RSP` 偏移；具名 `param+offset(FP)` 和 `go vet` 才是规范手段。
 
 ### 3.6 构建与验证
 
 ```bash
 go build -o snake .
-go tool nm ./snake | grep 'main\.Add'
-go tool objdump -s 'main\.Add' ./snake | head -20
+go tool nm ./snake | grep 'arith\.Add'
+go tool objdump -s 'goplan9snake/internal/arith\.Add' ./snake | head -20
 ```
 
 验收标准：
 
-- `go tool nm` 能看到 `main.Add.abi0`。
+- `go tool nm` 能看到 `goplan9snake/internal/arith.Add.abi0`。
 - `objdump` 中的指令与源码一致，而不是编译器生成的替身。
 - `go vet ./...` 不报告参数大小或偏移错误。
 
@@ -199,7 +207,7 @@ go tool objdump -s 'main\.Add' ./snake | head -20
 
 | 对比项 | ABI0 | ABIInternal |
 |---|---|---|
-| 符号示例 | `main.Add.abi0` | `main.Add` |
+| 符号示例 | `goplan9snake/internal/arith.Add.abi0` | `goplan9snake/internal/arith.Add` |
 | 从汇编调用 | `BL ·foo(SB)` | `BL ·foo<ABIInternal>(SB)` 或依赖包装 |
 | 是否手写 | 是 | 否；除非明确了解兼容性风险 |
 
@@ -216,7 +224,7 @@ TEXT ·f(SB), flags, $帧大小-参数大小
 | 项 | 单位 | 说明 |
 |---|---|---|
 | 帧大小 | 字节 | 局部变量占用的空间；不含自动保存的 `LR`/`FP` |
-| 参数大小 | 字节 | 参数 + 返回值的总字节数 |
+| 参数大小 | 字节 | ABI0 栈布局后的参数 + 对齐填充 + 返回值总字节数（以 `go vet` 为准） |
 | 对齐 | 字节 | 本项目约定帧大小为 16 的倍数 |
 | `NOFRAME` | 标志 | 要求帧大小为 0，并关闭分配帧的序言 |
 
@@ -303,9 +311,11 @@ done:
 
 补充缩写：GPR = General-Purpose Register（通用寄存器）；SIMD = Single Instruction, Multiple Data（单指令多数据）；LR = Link Register（链接寄存器）。
 
-### 5.3 调用者保存
+### 5.3 调用者保存与跨调用保留
 
-`R0`–`R17`、`R19`–`R26` 都是调用者保存（scratch）寄存器。跨 `BL` 调用仍需使用的值必须自己保存到栈或重新计算，不能指望被调用者保留。`R28`（g）、`R29`（FP）、`R30`（LR）由运行时和调用约定维护，不应作为普通数据寄存器。
+- **调用 Go / Plan 9 汇编函数（`BL ·foo(SB)`）**：Go 约定下 `R0`–`R17`、`R19`–`R26` 都是调用者保存（scratch）寄存器；跨 `BL` 仍需使用的值应保存到栈或重新计算。
+- **裸系统调用（`SVC $0x80`）与 C ABI（如 `BL libc_usleep(SB)`）**：Darwin 内核在 `SVC` 返回时除返回值寄存器（`R0`/`R1`）和标志位外会恢复通用寄存器；ARM64 C ABI（AAPCS64）规定 `R19`–`R28` 为被调用者保存（callee-saved）。因此在包含 `SVC` 或 `BL libc_usleep(SB)` 的循环里，可以把跨调用的循环状态放在 `R19`–`R26`（避开 Go 保留的 `R27`/`R28`）。
+- `R28`（g）、`R29`（FP）、`R30`（LR）由运行时和调用约定维护，绝不能作为普通数据寄存器。
 
 ### 5.4 浮点与 SIMD
 
@@ -674,7 +684,8 @@ CSET EQ, R2            // 若 EQ 则 R2 = 1，否则 0
 
 - `CMP a, b` 把后一个操作数 `b` 作为被比较值；条件描述的是 `b` 相对 `a` 的关系。
 - 无符号比较使用 `BHS`/`BLO`/`BHI`/`BLS`；有符号比较使用 `BGE`/`BLT`/`BGT`/`BLE`。
-- 数组下标、长度、地址一律按无符号处理，避免负数被当成巨大正数。
+- **有符号参数守卫必须用有符号条件码**：例如 `n int32` 的 `n <= 0` 边界（`FillByte`、`SumTo`、`sysWrite`）必须用 `MOVW`/`MOVD` 配合 `BLE`/`BLT`；若误用 `MOVWU` 或无符号 `BLS`/`BLO`，负数会被当成巨大正数。
+- 无符号类型（`uint32`/`uint64`/地址）或单次判断 `0 <= idx < bound` 时使用无符号条件码 `BHS`/`BLO`。
 - `BCC`/`BCS` 与 `BLO`/`BHS` 等价，系统调用错误检查通常使用 `BCC`/`BCS`。
 
 ## 10. 函数调用
@@ -860,9 +871,11 @@ go build -o snake .
 ### 13.3 常用命令
 
 ```bash
-go tool nm ./snake | grep 'main\.'
-go tool objdump -s 'main\.tick' ./snake
-go tool objdump -gnu -s 'main\.tick' ./snake
+go tool nm ./snake | grep 'goplan9snake/'
+go tool objdump -s 'goplan9snake/internal/arith\.Add' ./snake
+go tool objdump -gnu -s 'goplan9snake/internal/arith\.Add' ./snake
+go test -c ./internal/grid -o /tmp/grid.test
+go tool objdump -s 'goplan9snake/internal/grid\.CellIndex' /tmp/grid.test
 go build -gcflags=-S . 2>&1 | head -100
 asmfmt -w .
 dlv exec ./snake
@@ -871,8 +884,8 @@ dlv exec ./snake
 Delve 常用命令：
 
 ```text
-(dlv) disassemble -l main.tick
-(dlv) break main.tick
+(dlv) disassemble -l goplan9snake/internal/arith.Add
+(dlv) break goplan9snake/internal/arith.Add
 (dlv) step-instruction
 (dlv) regs
 ```
@@ -891,7 +904,7 @@ Delve 常用命令：
 | 现象 | 可能原因 | 处理 | 架构 |
 |---|---|---|---|
 | `undefined: NOSPLIT` | 缺少头文件 | 加 `#include "textflag.h"` | 通用 |
-| `wrong argument size` | `$帧-参数` 的参数大小与 Go 声明不符 | 按字节重算参数 + 返回值，运行 `go vet ./...` | 通用 |
+| `wrong argument size` | `$帧-参数` 的参数大小与 ABI0 栈布局不符 | 计入返回值区前的 8 字节对齐填充（如 `CellIndex` 为 `$0-20`），以 `go vet ./...` 的 `expected` 为准 | 通用 |
 | `invalid offset` / 参数名不匹配 | `a+0(FP)` 的名字或偏移与 Go 声明不一致 | 对照 Go 函数签名；名字必须完全一致 | 通用 |
 | `invalid instruction` / `illegal combination` | 操作数顺序、宽度后缀或寄存器组合错误 | 查第 7–9 章；用最小例子验证 | arm64 |
 | `illegal combination` 且操作数含 `(FP)`、`(R1)` 等 | 给运算/比较指令传了内存或伪寄存器操作数 | 先用 `MOV*` 装入寄存器；见 7.5 节 | arm64 |
@@ -973,114 +986,14 @@ Delve 常用命令：
 | ZR | Zero Register | 零寄存器 |
 | g | goroutine | 当前 goroutine 指针（arm64 的 `R28`） |
 
-### 16.3 arm64 指令
+### 16.3 arm64 指令助记符
 
-`W` 后缀表示 32 位形式（如 `NEGW`、`CMPW`、`CSELW`），`S` 后缀表示设置条件标志（如 `NEGS`），两者可以组合为 `NEGSW`。不带 `W` 的基名是 64 位形式；arm64 没有 D 宽度后缀（`CMP` 已是 64 位，不存在 `CMPD`）。下表列出常用基名和主要变体；完整列表见第 8 章。
+arm64 指令与分支条件码的英文展开已分别列在第 8 章（§8.1–§8.4）和第 9 章（§9.2）的“英文展开”列。命名后缀规则速查：
 
-| 缩写 | 英文全称 | 说明 |
-|---|---|---|
-| ADD | Add | 加 |
-| ADDS | Add and Set flags | 加法并设置标志 |
-| ADDSW | Add and Set flags, 32-bit | 32 位加法并设置标志 |
-| ADDW | Add, 32-bit | 32 位加法 |
-| AND | Bitwise AND | 按位与 |
-| ANDS | Bitwise AND and Set flags | 按位与并设置标志 |
-| ANDSW | Bitwise AND and Set flags, 32-bit | 32 位按位与并设置标志 |
-| ANDW | Bitwise AND, 32-bit | 32 位按位与 |
-| ASR | Arithmetic Shift Right | 算术右移 |
-| ASRW | Arithmetic Shift Right, 32-bit | 32 位算术右移 |
-| B | Branch | 分支 |
-| BCC | Branch if Carry Clear | 无符号小于 |
-| BCS | Branch if Carry Set | 无符号大于等于 |
-| BEQ | Branch if EQual | 相等 |
-| BGE | Branch if Greater or Equal | 有符号大于等于 |
-| BGT | Branch if Greater Than | 有符号大于 |
-| BHI | Branch if HIgher | 无符号大于 |
-| BHS | Branch if Higher or Same | 无符号大于等于 |
-| BIC | Bit Clear | 位清除 |
-| BICSW | Bit Clear and Set flags, 32-bit | 32 位位清除并设置标志 |
-| BICW | Bit Clear, 32-bit | 32 位位清除 |
-| BL | Branch with Link | 带链接分支（调用） |
-| BLE | Branch if Less or Equal | 有符号小于等于 |
-| BLO | Branch if LOwer | 无符号小于 |
-| BLS | Branch if Lower or Same | 无符号小于等于 |
-| BLT | Branch if Less Than | 有符号小于 |
-| BMI | Branch if MInus | 负 |
-| BNE | Branch if Not Equal | 不等 |
-| BPL | Branch if PLus | 非负 |
-| BVC | Branch if oVerflow Clear | 溢出清除 |
-| BVS | Branch if oVerflow Set | 溢出设置 |
-| CBZ | Compare and Branch on Zero | 为零则分支 |
-| CBZW | Compare and Branch on Zero, 32-bit | 32 位为零则分支 |
-| CBNZ | Compare and Branch on Non-Zero | 非零则分支 |
-| CBNZW | Compare and Branch on Non-Zero, 32-bit | 32 位非零则分支 |
-| CCMN | Conditional Compare Negative | 64 位条件比较（加法） |
-| CCMP | Conditional Compare | 64 位条件比较 |
-| CMP | Compare | 比较（64 位；没有 `CMPD`） |
-| CMPW | Compare, 32-bit | 32 位比较 |
-| CMN | Compare Negative | 比较负数（64 位，加法形式） |
-| CMNW | Compare Negative, 32-bit | 32 位比较负数 |
-| CSEL | Conditional Select | 条件选择 |
-| CSELW | Conditional Select, 32-bit | 32 位条件选择 |
-| CSET | Conditional Set | 条件置位 |
-| CSETM | Conditional Set Mask | 条件置位为全 1 |
-| CSETMW | Conditional Set Mask, 32-bit | 32 位条件置位为全 1 |
-| CSETW | Conditional Set, 32-bit | 32 位条件置位 |
-| CSINC | Conditional Select Increment | 条件选择并自增 |
-| CSINCW | Conditional Select Increment, 32-bit | 32 位条件选择并自增 |
-| CSINV | Conditional Select Invert | 条件选择并取反 |
-| CSINVW | Conditional Select Invert, 32-bit | 32 位条件选择并取反 |
-| CSNEG | Conditional Select Negate | 条件选择并取负 |
-| CSNEGW | Conditional Select Negate, 32-bit | 32 位条件选择并取负 |
-| EOR | Exclusive OR | 异或 |
-| EORW | Exclusive OR, 32-bit | 32 位异或 |
-| LDP | Load Pair | 加载寄存器对 |
-| LDPW | Load Pair, 32-bit | 32 位加载寄存器对 |
-| LSL | Logical Shift Left | 逻辑左移 |
-| LSLW | Logical Shift Left, 32-bit | 32 位逻辑左移 |
-| LSR | Logical Shift Right | 逻辑右移 |
-| LSRW | Logical Shift Right, 32-bit | 32 位逻辑右移 |
-| MADD | Multiply-Add | 乘加 |
-| MADDW | Multiply-Add, 32-bit | 32 位乘加 |
-| MOVB | Move Byte | 字节移动 |
-| MOVBU | Move Byte Unsigned | 无符号字节移动 |
-| MOVD | Move Doubleword | 双字（64 位）移动 |
-| MOVH | Move Halfword | 半字（16 位）移动 |
-| MOVHU | Move Halfword Unsigned | 无符号半字移动 |
-| MOVK | Move Keep | 保留其他位并写入半字 |
-| MOVN | Move Not | 立即数取反写入 |
-| MOVW | Move Word | 字（32 位）移动 |
-| MOVWU | Move Word Unsigned | 无符号字移动 |
-| MOVZ | Move Zero | 写入半字并清零其余位 |
-| MSUB | Multiply-Subtract | 乘减 |
-| MSUBW | Multiply-Subtract, 32-bit | 32 位乘减 |
-| MUL | Multiply | 乘 |
-| MULW | Multiply, 32-bit | 32 位乘 |
-| MVN | Move Not | 按位取反 |
-| MVNW | Move Not, 32-bit | 32 位按位取反 |
-| NEG | Negate | 取负 |
-| NEGSW | Negate and Set flags, 32-bit | 32 位取负并设置标志 |
-| NEGW | Negate, 32-bit | 32 位取负 |
-| ORR | Bitwise OR | 按位或 |
-| ORRW | Bitwise OR, 32-bit | 32 位按位或 |
-| RET | Return | 返回 |
-| ROR | Rotate Right | 循环右移 |
-| RORW | Rotate Right, 32-bit | 32 位循环右移 |
-| SDIV | Signed Divide | 有符号除 |
-| SDIVW | Signed Divide, 32-bit | 32 位有符号除 |
-| STP | Store Pair | 存储寄存器对 |
-| STPW | Store Pair, 32-bit | 32 位存储寄存器对 |
-| SUB | Subtract | 减 |
-| SUBS | Subtract and Set flags | 减法并设置标志 |
-| SUBSW | Subtract and Set flags, 32-bit | 32 位减法并设置标志 |
-| SUBW | Subtract, 32-bit | 32 位减法 |
-| SVC | Supervisor Call | 管理员调用（系统调用指令） |
-| TBZ | Test Bit and Branch if Zero | 测试位为零则分支 |
-| TBNZ | Test Bit and Branch if Non-Zero | 测试位非零则分支 |
-| TST | Test | 按位测试 |
-| TSTW | Test, 32-bit | 32 位按位测试 |
-| UDIV | Unsigned Divide | 无符号除 |
-| UDIVW | Unsigned Divide, 32-bit | 32 位无符号除 |
+- 不带 `W` 的基名（如 `ADD`、`SUB`、`CMP`、`CSEL`）均为 **64 位整数运算**（不存在 `ADDD`/`CMPD`）；
+- `W` 后缀表示 **32 位形式**（如 `ADDW`、`NEGW`、`CMPW`、`CSELW`，写入时清零高 32 位）；
+- `S` 后缀表示**设置条件标志 N/Z/C/V**（如 `ADDS`、`SUBS`、`NEGS`），可与 `W` 组合为 `SW`（如 `SUBSW`、`NEGSW`）；
+- `.P` / `.W` 后缀用于搬运指令（`MOV*`/`FMOV*`/`LDP`/`STP`），分别表示**后索引（Post-index）**与**前索引（Pre-index）**地址写回。
 
 ### 16.4 系统调用、终端与工具
 

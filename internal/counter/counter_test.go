@@ -2,21 +2,11 @@ package counter
 
 import "testing"
 
-// 契约（代理复述；与实现冲突时先停下来改契约，不要迁就实现）：
-//
-//   - Reset 把包级 BSS 计数器归零，无返回值；可重复调用。
-//   - Inc 先把计数器加一，再返回加一后的值：Reset 后连续调用依次得到
-//     1, 2, 3, ...。返回“加一前的旧值”（0, 1, 2, ...）是另一种可选契约；
-//     当前测试按“返回新值”编写，若改成旧值需同步改 TestInc 与
-//     TestIncReturnsRunningTotal 的期望。
-//   - 初始值是 BSS 零值 0，但测试不依赖执行顺序：每个测试/子测试先 Reset。
-//   - 计数器是包级共享状态：测试不使用 t.Parallel()。
-//   - int64 溢出按二进制补码回绕（ADD 语义）；从 0 出发需要 2^63 次调用
-//     才可能触发，测试不可达，因此这里只记录契约、不做断言。
-//
-// 由于没有 getter，Reset 的效果只能通过随后的 Inc 观察。
+// Package counter 的测试遵循 docs/2.2-CONTRACTS.md §4.1 冻结契约（详见 counter.go）。
+// 由于没有独立 getter，Reset 的效果通过紧随其后的 Inc 返回值观察；
+// 计数器是包级共享 BSS 状态，每个用例前必须调用 Reset 且不使用 t.Parallel()。
 
-// incSequenceLen 是逐次对拍的长度：有上限，算法错误时测试不会挂死。
+// incSequenceLen 是逐次对拍的长度：固定上界，防止算法错误时挂死。
 const incSequenceLen = 100_000
 
 // TestInc 用字面量冻结“Reset 后第 N 次调用返回 N”。
